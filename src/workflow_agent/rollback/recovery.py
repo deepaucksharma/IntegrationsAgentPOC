@@ -90,31 +90,31 @@ class RecoveryManager:
         # Generate a dynamic rollback script if no template is found
         if not template_str or not template_str.strip():
             logger.info("No rollback template found, generating dynamic rollback script")
-            template_str = f"""#!/usr/bin/env bash
+            template_str = """#!/usr/bin/env bash
 set -e
-echo "Rolling back changes for {state.target_name}..."
-echo "Original error: {state.error}"
+echo "Rolling back changes for {{ target_name }}..."
+echo "Original error: {{ error }}"
 
-log_message() {{
+log_message() {
     local level="$1"
     local message="$2"
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] [$level] $message"
-}}
+}
 
-error_exit() {{
+error_exit() {
     local message="$1"
-    local code="${{2:-1}}"
+    local code="${2:-1}"
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] [ERROR] $message" >&2
     exit "$code"
-}}
+}
 
 # Create a cleanup trap
-cleanup() {{
+cleanup() {
     log_message "INFO" "Cleanup complete"
-}}
+}
 trap cleanup EXIT
 
-log_message "INFO" "Starting rollback for failed {state.action} of {state.target_name}"
+log_message "INFO" "Starting rollback for failed {{ action }} of {{ target_name }}"
 
 {% for change in changes %}
 log_message "INFO" "Reverting: {{ change.details }}"
@@ -146,7 +146,8 @@ log_message "INFO" "Rollback completed"
                 parameters=state.parameters,
                 error=state.error,
                 changes=changes,
-                rollback_commands=rollback_commands
+                rollback_commands=rollback_commands,
+                action=state.action
             )
             
             temp_dir = tempfile.mkdtemp(prefix='workflow-rollback-')

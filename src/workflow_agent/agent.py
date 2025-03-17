@@ -4,8 +4,8 @@ import os
 from typing import Dict, Any, Optional, List
 from .core.agent import BaseAgent, AgentState, AgentResult
 from .workflow import WorkflowGraph, WorkflowExecutor
-from .config.configuration import ensure_workflow_config, parameter_schemas
-from .config.schemas import load_parameter_schemas
+from .config.configuration import ensure_workflow_config
+from .config.schemas import parameter_schemas, load_parameter_schemas
 from .core.state import WorkflowState
 from .storage import HistoryManager
 from .scripting import ScriptGenerator, ScriptValidator

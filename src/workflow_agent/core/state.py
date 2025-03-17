@@ -12,7 +12,7 @@ class ParameterSpec(BaseModel):
         extra = "allow"  # Allow extra fields for extensibility
 
 class ParameterSchema(BaseModel):
-    __root__: Dict[str, ParameterSpec]
+    parameters: Dict[str, ParameterSpec] = Field(..., alias="__root__")
 
 class ExecutionMetrics(BaseModel):
     """Metrics collected during script execution."""

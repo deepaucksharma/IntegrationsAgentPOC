@@ -1,0 +1,3 @@
+llm = ["langchain-openai==0.0.1"]
+doc = ["sphinx", "sphinx-rtd-theme"]
+dev = ["black", "isort", "pylint", "mypy"] 

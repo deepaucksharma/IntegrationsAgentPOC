@@ -178,7 +178,6 @@ class SQLiteAdapter:
         finally:
             session.close()
     
-    # Implement other methods similarly to the other adapter classes...
     async def get_execution_history(
         self,
         target: str,
@@ -228,7 +227,132 @@ class SQLiteAdapter:
             logger.error(f"Error retrieving execution history: {e}")
             return []
     
-    # Additional methods would be implemented here
+    async def get_execution_statistics(
+        self,
+        target: str,
+        action: str,
+        user_id: str = None
+    ) -> Dict[str, Any]:
+        """
+        Get execution statistics for a specific target and action.
+        
+        Args:
+            target: Target name to filter by
+            action: Action to filter by
+            user_id: Optional user ID to filter by
+            
+        Returns:
+            Dictionary with execution statistics including:
+            - total_executions: Total number of executions
+            - successful_executions: Number of successful executions
+            - failed_executions: Number of failed executions
+            - avg_execution_time: Average execution time in milliseconds
+            - success_rate: Percentage of successful executions
+        """
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                db.row_factory = aiosqlite.Row
+                
+                query = '''
+                    SELECT 
+                        COUNT(*) as total_executions,
+                        SUM(CASE WHEN success = 1 THEN 1 ELSE 0 END) as successful_executions,
+                        SUM(CASE WHEN success = 0 THEN 1 ELSE 0 END) as failed_executions,
+                        AVG(execution_time) as avg_execution_time
+                    FROM execution_records
+                    WHERE target_name = ? AND action = ?
+                '''
+                params = [target, action]
+                
+                if user_id:
+                    query += " AND user_id = ?"
+                    params.append(user_id)
+                
+                cursor = await db.execute(query, params)
+                row = await cursor.fetchone()
+                
+                if row["total_executions"] == 0:
+                    return {
+                        "total_executions": 0,
+                        "successful_executions": 0,
+                        "failed_executions": 0,
+                        "avg_execution_time": 0,
+                        "success_rate": 0
+                    }
+                
+                return {
+                    "total_executions": row["total_executions"],
+                    "successful_executions": row["successful_executions"],
+                    "failed_executions": row["failed_executions"],
+                    "avg_execution_time": round(row["avg_execution_time"], 2),
+                    "success_rate": round((row["successful_executions"] / row["total_executions"]) * 100, 2)
+                }
+        except Exception as e:
+            logger.error(f"Error retrieving execution statistics: {e}")
+            return {
+                "total_executions": 0,
+                "successful_executions": 0,
+                "failed_executions": 0,
+                "avg_execution_time": 0,
+                "success_rate": 0
+            }
+    
+    async def clear_history(
+        self,
+        target: str = None,
+        action: str = None,
+        days: int = None,
+        user_id: str = None
+    ) -> int:
+        """
+        Clear execution history records.
+        
+        Args:
+            target: Optional target name to filter by
+            action: Optional action to filter by
+            days: Optional number of days to keep (older records will be deleted)
+            user_id: Optional user ID to filter by
+            
+        Returns:
+            Number of records deleted
+        """
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                # Build the WHERE clause
+                where_clauses = []
+                params = []
+                
+                if target:
+                    where_clauses.append("target_name = ?")
+                    params.append(target)
+                
+                if action:
+                    where_clauses.append("action = ?")
+                    params.append(action)
+                
+                if user_id:
+                    where_clauses.append("user_id = ?")
+                    params.append(user_id)
+                
+                if days:
+                    where_clauses.append("timestamp < datetime('now', ?)")
+                    params.append(f"-{days} days")
+                
+                # Construct the query
+                query = "DELETE FROM execution_records"
+                if where_clauses:
+                    query += " WHERE " + " AND ".join(where_clauses)
+                
+                # Execute the query
+                cursor = await db.execute(query, params)
+                await db.commit()
+                
+                count = cursor.rowcount
+                logger.info(f"Cleared {count} execution records")
+                return count
+        except Exception as e:
+            logger.error(f"Error clearing execution history: {e}")
+            return 0
     
     async def close(self):
         """Close database connections."""
