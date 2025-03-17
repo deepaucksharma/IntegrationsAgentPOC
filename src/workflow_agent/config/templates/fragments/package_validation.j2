@@ -1,0 +1,16 @@
+# Package validation
+{% for package in required_packages %}
+if ! command -v {{ package }} &> /dev/null; then
+  log_message "Required package {{ package }} is not installed"
+  
+  if command -v apt-get &> /dev/null; then
+    log_message "Installing {{ package }} using apt-get"
+    apt-get update && apt-get install -y {{ package }} || error_exit "Failed to install {{ package }}"
+  elif command -v yum &> /dev/null; then
+    log_message "Installing {{ package }} using yum"
+    yum install -y {{ package }} || error_exit "Failed to install {{ package }}"
+  else
+    error_exit "Package {{ package }} is required but not installed, and no supported package manager found"
+  fi
+fi
+{% endfor %} 

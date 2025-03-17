@@ -13,7 +13,8 @@ class WorkflowExecutor:
     def __init__(
         self,
         graph: Optional[WorkflowGraph] = None,
-        default_config: Optional[Dict[str, Any]] = None
+        default_config: Optional[Dict[str, Any]] = None,
+        max_concurrent_tasks: int = 5
     ):
         """
         Initialize the workflow executor.
@@ -21,9 +22,11 @@ class WorkflowExecutor:
         Args:
             graph: Optional workflow graph
             default_config: Optional default configuration
+            max_concurrent_tasks: Maximum number of concurrent tasks to execute
         """
         self.graph = graph or WorkflowGraph()
         self.default_config = default_config or {}
+        self.max_concurrent_tasks = max_concurrent_tasks
     
     async def execute_workflow(
         self,

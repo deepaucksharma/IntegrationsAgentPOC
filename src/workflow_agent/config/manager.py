@@ -6,7 +6,7 @@ import yaml
 from dataclasses import dataclass
 from .schemas import ParameterSpec
 from functools import lru_cache
-from .configuration import ensure_workflow_config, WorkflowConfiguration
+from .configuration import WorkflowConfiguration, ensure_workflow_config
 from ..error.exceptions import ConfigurationError
 
 logger = logging.getLogger(__name__)
@@ -30,58 +30,99 @@ class WorkflowConfig:
     history_retention_days: int
 
 class ConfigurationManager:
-    """Manages configuration with caching support."""
+    """Centralized configuration management with caching support."""
     
     def __init__(self, config_dir: Optional[Path] = None):
         """Initialize the configuration manager."""
         self.config_dir = config_dir or Path("config")
         self.config_dir.mkdir(parents=True, exist_ok=True)
+        self._config: Optional[WorkflowConfiguration] = None
     
     @lru_cache(maxsize=1)
     def get_workflow_config(self, config: Optional[Dict[str, Any]] = None) -> WorkflowConfiguration:
-        """Get workflow configuration with caching."""
+        """
+        Get workflow configuration with caching.
+        
+        Args:
+            config: Optional configuration dictionary to override defaults
+            
+        Returns:
+            Validated WorkflowConfiguration object
+            
+        Raises:
+            ConfigurationError: If configuration is invalid
+        """
         try:
-            return ensure_workflow_config(config)
+            # Load base config from file if exists
+            base_config = {}
+            config_path = self.config_dir / "workflow_config.yaml"
+            if config_path.exists():
+                with open(config_path) as f:
+                    base_config = yaml.safe_load(f)
+            
+            # Override with environment variables
+            env_config = self._load_env_config()
+            
+            # Merge configurations with proper precedence
+            merged_config = self._merge_configs(base_config, env_config, config or {})
+            
+            # Validate and create WorkflowConfiguration
+            return ensure_workflow_config(merged_config)
         except Exception as e:
             logger.error(f"Failed to load workflow config: {e}")
             raise ConfigurationError(f"Invalid workflow configuration: {str(e)}")
     
-    @lru_cache(maxsize=100)
-    def get_template(self, template_name: str) -> str:
-        """Get template content with caching."""
-        template_path = self.config_dir / "templates" / template_name
-        try:
-            if not template_path.exists():
-                raise ConfigurationError(f"Template not found: {template_name}")
-            return template_path.read_text()
-        except Exception as e:
-            logger.error(f"Failed to load template {template_name}: {e}")
-            raise ConfigurationError(f"Failed to load template {template_name}: {str(e)}")
+    def _load_env_config(self) -> Dict[str, Any]:
+        """Load configuration from environment variables."""
+        config = {}
+        prefix = 'WORKFLOW_'
+        
+        for key, value in os.environ.items():
+            if key.startswith(prefix):
+                # Convert WORKFLOW_TIMEOUT to timeout
+                config_key = key[len(prefix):].lower()
+                config[config_key] = value
+                
+        return config
     
-    @lru_cache(maxsize=10)
-    def get_schema(self, schema_name: str) -> Dict[str, Any]:
-        """Get schema with caching."""
-        schema_path = self.config_dir / "schemas" / f"{schema_name}.yaml"
-        try:
-            if not schema_path.exists():
-                raise ConfigurationError(f"Schema not found: {schema_name}")
-            with open(schema_path) as f:
-                return yaml.safe_load(f)
-        except Exception as e:
-            logger.error(f"Failed to load schema {schema_name}: {e}")
-            raise ConfigurationError(f"Failed to load schema {schema_name}: {str(e)}")
+    def _merge_configs(self, *configs: Dict[str, Any]) -> Dict[str, Any]:
+        """Merge multiple configuration dictionaries with proper precedence."""
+        result = {}
+        
+        for config in configs:
+            for key, value in config.items():
+                if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+                    result[key] = self._merge_configs(result[key], value)
+                else:
+                    result[key] = value
+        
+        return result
     
     def clear_cache(self) -> None:
         """Clear all cached configurations."""
         self.get_workflow_config.cache_clear()
-        self.get_template.cache_clear()
-        self.get_schema.cache_clear()
         logger.info("Cleared configuration cache")
     
     def reload_config(self) -> None:
         """Reload all configurations."""
         self.clear_cache()
         logger.info("Reloaded all configurations")
+    
+    def save_config(self, config: WorkflowConfiguration) -> None:
+        """
+        Save configuration to file.
+        
+        Args:
+            config: Configuration to save
+        """
+        try:
+            config_path = self.config_dir / "workflow_config.yaml"
+            with open(config_path, 'w') as f:
+                yaml.dump(config.dict(), f, default_flow_style=False)
+            logger.info(f"Saved configuration to {config_path}")
+        except Exception as e:
+            logger.error(f"Failed to save configuration: {e}")
+            raise ConfigurationError(f"Failed to save configuration: {str(e)}")
 
 class ConfigManager:
     """Centralized configuration management."""

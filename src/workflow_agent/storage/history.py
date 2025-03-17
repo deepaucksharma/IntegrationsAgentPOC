@@ -19,8 +19,15 @@ class HistoryManager:
         """
         self.adapter = get_adapter(connection_string)
         
-    async def initialize(self):
-        """Initialize the history storage."""
+    async def initialize(self, config: Optional[Dict[str, Any]] = None) -> None:
+        """
+        Initialize the history storage.
+        
+        Args:
+            config: Optional configuration dictionary
+        """
+        if config and "configurable" in config and "db_connection_string" in config["configurable"]:
+            self.adapter = get_adapter(config["configurable"]["db_connection_string"])
         await self.adapter.initialize()
         
     async def save_execution(
@@ -216,3 +223,7 @@ class HistoryManager:
             limit=limit,
             user_id=user_id
         )
+    
+    async def cleanup(self) -> None:
+        """Clean up resources."""
+        await self.close()

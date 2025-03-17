@@ -1,12 +1,24 @@
 import abc
 from typing import Any, Dict, List, Optional
+from dataclasses import dataclass
+
+@dataclass
+class AgentConfig:
+    """Base configuration for all agents."""
+    name: str
+    description: str
+    max_concurrent_tasks: int = 5
+    use_isolation: bool = True
+    isolation_method: str = "docker"
+    execution_timeout: int = 300
 
 class AbstractWorkflowAgent(abc.ABC):
     """Abstract base class for all workflow agents in the system."""
     
-    def __init__(self, name: str, description: str):
-        self.name = name
-        self.description = description
+    def __init__(self, config: AgentConfig):
+        self.config = config
+        self.name = config.name
+        self.description = config.description
 
     @abc.abstractmethod
     async def invoke(self, input_state: Dict[str, Any], config: Dict[str, Any] = None) -> Dict[str, Any]:
@@ -46,6 +58,22 @@ class AbstractWorkflowAgent(abc.ABC):
             List of capability strings
         """
         pass
+
+    def get_config_schema(self) -> Dict[str, Any]:
+        """
+        Get the configuration schema for the agent.
+        
+        Returns:
+            Dictionary describing the configuration schema
+        """
+        return {
+            "name": "string",
+            "description": "string",
+            "max_concurrent_tasks": "number",
+            "use_isolation": "boolean",
+            "isolation_method": "string",
+            "execution_timeout": "number"
+        }
 
 # Simple types for agent state and result.
 AgentState = Dict[str, Any]

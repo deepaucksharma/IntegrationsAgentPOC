@@ -2,13 +2,19 @@
 import logging
 from typing import Dict, Any, Optional
 from prometheus_client import Counter, Histogram, Gauge
-from opentelemetry import trace, metrics
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.metrics import MeterProvider
-from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
-from opentelemetry.instrumentation.aiohttp import AioHttpClientInstrumentor
 
 logger = logging.getLogger(__name__)
+
+try:
+    from opentelemetry import trace, metrics
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.metrics import MeterProvider
+    from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
+    from opentelemetry.instrumentation.aiohttp import AioHttpClientInstrumentor
+    HAS_TELEMETRY = True
+except ImportError:
+    logger.warning("OpenTelemetry packages not found. Tracing will be disabled.")
+    HAS_TELEMETRY = False
 
 # Prometheus metrics
 WORKFLOW_EXECUTIONS = Counter(
@@ -48,12 +54,16 @@ class MetricsCollector:
     
     def __init__(self, enable_tracing: bool = True):
         """Initialize the metrics collector."""
-        self.enable_tracing = enable_tracing
-        if enable_tracing:
+        self.enable_tracing = enable_tracing and HAS_TELEMETRY
+        if self.enable_tracing:
             self._setup_tracing()
     
     def _setup_tracing(self) -> None:
         """Set up OpenTelemetry tracing."""
+        if not HAS_TELEMETRY:
+            logger.warning("OpenTelemetry not available. Skipping tracing setup.")
+            return
+            
         try:
             # Set up tracer provider
             tracer_provider = TracerProvider()
@@ -72,6 +82,7 @@ class MetricsCollector:
             logger.info("Initialized OpenTelemetry tracing")
         except Exception as e:
             logger.error(f"Failed to initialize tracing: {e}")
+            self.enable_tracing = False
     
     def record_workflow_execution(
         self,

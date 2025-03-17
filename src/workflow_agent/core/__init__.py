@@ -1,9 +1,9 @@
-from .agent import BaseAgent
+from .agent import AbstractWorkflowAgent
 from .state import WorkflowState, ParameterSchema, ParameterSpec, Change, ExecutionMetrics, OutputData
 from .interfaces import PluginInterface
 
 __all__ = [
-    "BaseAgent",
+    "AbstractWorkflowAgent",
     "WorkflowState",
     "ParameterSchema", 
     "ParameterSpec", 

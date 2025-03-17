@@ -35,13 +35,45 @@ class SQLiteAdapter(BaseAdapter):
         self.db = None
         
         # For SQLAlchemy (sync)
-        self.engine = create_engine(connection_string)
+        self.engine = create_engine(f"sqlite:///{connection_string}")
         self.SessionLocal = sessionmaker(bind=self.engine)
         
         # Import ExecutionRecord model from parent module to avoid circular imports
         from ..models import Base
         self.Base = Base
         self.ExecutionRecord = ExecutionRecord
+    
+    def _validate_connection_string(self, connection_string: str) -> bool:
+        """
+        Validate the connection string format.
+        
+        Args:
+            connection_string: SQLite database path
+            
+        Returns:
+            bool: True if connection string is valid, False otherwise
+        """
+        if not connection_string:
+            return False
+            
+        # If it's a SQLite URL, use parent's validation
+        if connection_string.startswith(('sqlite://', 'sqlite3://')):
+            return super()._validate_connection_string(connection_string)
+            
+        # Otherwise, treat it as a file path
+        try:
+            # Get the directory part of the path
+            directory = os.path.dirname(connection_string)
+            
+            # If directory is empty, it's in current directory which is fine
+            if not directory:
+                return True
+                
+            # Check if directory exists and is writable
+            return os.path.exists(directory) and os.access(directory, os.W_OK)
+        except Exception as e:
+            logger.error(f"Error validating SQLite path: {e}")
+            return False
     
     async def initialize(self) -> None:
         """Initialize the database schema."""

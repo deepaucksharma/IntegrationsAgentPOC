@@ -18,7 +18,8 @@ class WorkflowConfiguration(BaseModel):
     system_prompt: str = "You are a helpful workflow agent."
     template_dir: str = "./templates"
     custom_template_dir: Optional[str] = None  # Added: for user-defined templates
-    use_isolation: bool = False
+    use_isolation: bool = True  # Changed default to True for security
+    enforce_isolation: bool = False  # New: Whether to fail if isolation method is not available
     isolation_method: str = "docker"  # Added: docker, chroot, venv, none
     execution_timeout: int = 30000  # in milliseconds
     skip_verification: bool = False
@@ -75,6 +76,11 @@ def ensure_workflow_config(config: Optional[Dict[str, Any]] = None) -> WorkflowC
         if config.get("use_isolation", True):
             isolation_method = config.get("isolation_method")
             if not isolation_method:
+                if config.get("enforce_isolation", False):
+                    raise ValueError(
+                        "Isolation is enforced but no isolation method specified. "
+                        "Please specify an isolation method or set enforce_isolation=False."
+                    )
                 logger.warning(
                     "Isolation requested but no isolation method specified. "
                     "This may lead to direct execution without isolation. "

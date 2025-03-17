@@ -53,6 +53,11 @@ class WorkflowState(BaseModel):
     optimized: bool = False
     messages: List[str] = Field(default_factory=list)
 
+    # Extended fields for categorization
+    integration_category: Optional[str] = None  # Category for organization
+    subcategory: Optional[str] = None  # Subcategory for more specific organization
+    version: Optional[str] = None  # Version of the integration
+
     # Optional fields that nodes may update
     parameter_schema: Optional[Dict[str, ParameterSpec]] = None
     template_key: Optional[str] = None
@@ -72,6 +77,10 @@ class WorkflowState(BaseModel):
     custom_verification: Optional[str] = None  # Custom verification command
     isolation_method: Optional[str] = "docker"  # Isolation method to use
     plugin_data: Dict[str, Any] = Field(default_factory=dict)  # Data from plugins
+    
+    # Dependencies and related integrations
+    dependencies: List[str] = Field(default_factory=list)  # Required dependencies
+    related_integrations: List[str] = Field(default_factory=list)  # Related integrations
 
     class Config:
         """Configuration for the model."""

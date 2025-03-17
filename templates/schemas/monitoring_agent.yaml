@@ -1,0 +1,12 @@
+name: monitoring_agent
+description: Schema for monitoring agent parameters
+parameters:
+  api_key:
+    type: string
+    description: API key for the monitoring service
+    required: true
+  endpoint:
+    type: string
+    description: Endpoint URL for the monitoring service
+    required: true
+    default: "https://monitoring.example.com" 

@@ -2,17 +2,19 @@ import logging
 import uuid
 import os
 from typing import Dict, Any, Optional, List
-from .core.agent import AbstractWorkflowAgent, AgentState, AgentResult
+from .core.agent import AbstractWorkflowAgent, AgentState, AgentResult, AgentConfig
 from .workflow import WorkflowGraph, WorkflowExecutor
 from .config.configuration import ensure_workflow_config
-from .config.schemas import parameter_schemas, load_parameter_schemas
+from .config.schemas import get_schema
+from .config.templates import reload_templates
 from .core.state import WorkflowState
 from .storage import HistoryManager
 from .scripting import ScriptGenerator, ScriptValidator
-from .execution import ScriptExecutor
+from .execution import ScriptExecutor, ResourceLimiter
 from .verification import Verifier
 from .rollback import RecoveryManager
 from .error.exceptions import WorkflowError, ValidationError, ExecutionError
+from .integrations.registry import IntegrationRegistry
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
@@ -28,29 +30,50 @@ class WorkflowAgentConfig:
     recovery_manager: Optional[RecoveryManager] = None
     max_concurrent_tasks: int = 5
     use_isolation: bool = True
-    isolation_method: str = "sandbox"
-    execution_timeout: int = 300
+    isolation_method: str = "docker"
+    execution_timeout: int = 300000
     skip_verification: bool = False
-    use_llm_optimization: bool = True
+    use_llm_optimization: bool = False
     rule_based_optimization: bool = True
     use_static_analysis: bool = True
+    resource_limiter: Optional[ResourceLimiter] = None
 
 class WorkflowAgent(AbstractWorkflowAgent):
     """An agent that orchestrates multi-step workflows with validation and rollback."""
     
     def __init__(self, config: Optional[WorkflowAgentConfig] = None):
         """Initialize the workflow agent with dependency injection."""
-        super().__init__("WorkflowAgent", "An agent that orchestrates multi-step workflows with validation and rollback")
+        self.workflow_config = config or WorkflowAgentConfig()
         
-        self.config = config or WorkflowAgentConfig()
+        # Create agent config
+        agent_config = AgentConfig(
+            name="WorkflowAgent",
+            description="An agent that orchestrates multi-step workflows with validation and rollback",
+            max_concurrent_tasks=self.workflow_config.max_concurrent_tasks,
+            use_isolation=self.workflow_config.use_isolation,
+            isolation_method=self.workflow_config.isolation_method,
+            execution_timeout=self.workflow_config.execution_timeout
+        )
+        
+        super().__init__(agent_config)
+        
+        # Set up resource limiter
+        resource_limiter = self.workflow_config.resource_limiter or ResourceLimiter(
+            max_concurrent=self.workflow_config.max_concurrent_tasks
+        )
         
         # Initialize components with dependency injection
-        self.history_manager = self.config.history_manager or HistoryManager()
-        self.script_generator = self.config.script_generator or ScriptGenerator(self.history_manager)
-        self.script_validator = self.config.script_validator or ScriptValidator()
-        self.script_executor = self.config.script_executor or ScriptExecutor(self.history_manager)
-        self.verifier = self.config.verifier or Verifier()
-        self.recovery_manager = self.config.recovery_manager or RecoveryManager(self.history_manager)
+        self.history_manager = self.workflow_config.history_manager or HistoryManager()
+        self.script_generator = self.workflow_config.script_generator or ScriptGenerator(self.history_manager)
+        self.script_validator = self.workflow_config.script_validator or ScriptValidator()
+        self.script_executor = self.workflow_config.script_executor or ScriptExecutor(
+            self.history_manager, 
+            timeout=self.workflow_config.execution_timeout // 1000,  # Convert from ms to seconds
+            max_concurrent=self.workflow_config.max_concurrent_tasks,
+            resource_limiter=resource_limiter
+        )
+        self.verifier = self.workflow_config.verifier or Verifier()
+        self.recovery_manager = self.workflow_config.recovery_manager or RecoveryManager(self.history_manager)
         
         # Set up workflow graph
         self.graph = self._create_workflow_graph()
@@ -58,7 +81,7 @@ class WorkflowAgent(AbstractWorkflowAgent):
         # Create workflow executor with concurrency control
         self.workflow_executor = WorkflowExecutor(
             self.graph,
-            max_concurrent_tasks=self.config.max_concurrent_tasks
+            max_concurrent_tasks=self.workflow_config.max_concurrent_tasks
         )
     
     def _create_workflow_graph(self) -> WorkflowGraph:
@@ -66,20 +89,61 @@ class WorkflowAgent(AbstractWorkflowAgent):
         graph = WorkflowGraph()
         
         # Add workflow nodes
-        graph.add_node("validate_parameters", self._validate_parameters)
-        graph.add_node("generate_script", self._generate_script)
-        graph.add_node("validate_script", self._validate_script)
-        graph.add_node("run_script", self._run_script)
-        graph.add_node("verify_result", self._verify_result)
-        graph.add_node("rollback_changes", self._rollback_changes)
+        graph.add_node(
+            "validate_parameters", 
+            self._validate_parameters,
+            retry_count=2,
+            retry_delay=1.0
+        )
+        
+        graph.add_node(
+            "generate_script", 
+            self._generate_script,
+            retry_count=2,
+            retry_delay=1.0
+        )
+        
+        graph.add_node(
+            "validate_script", 
+            self._validate_script,
+            retry_count=1,
+            retry_delay=1.0
+        )
+        
+        graph.add_node(
+            "run_script", 
+            self._run_script,
+            retry_count=0,  # Don't retry script execution automatically
+            timeout=self.workflow_config.execution_timeout / 1000  # Convert to seconds
+        )
+        
+        graph.add_node(
+            "verify_result", 
+            self._verify_result,
+            retry_count=2,
+            retry_delay=2.0,
+            optional=True  # Verification is optional
+        )
+        
+        graph.add_node(
+            "rollback_changes", 
+            self._rollback_changes,
+            requires_previous=False,  # Rollback doesn't require previous nodes
+            retry_count=1,
+            retry_delay=1.0
+        )
         
         # Set up transitions
-        graph.add_transition("validate_parameters", "generate_script")
-        graph.add_transition("generate_script", "validate_script")
-        graph.add_transition("validate_script", "run_script")
-        graph.add_transition("run_script", "verify_result")
-        graph.add_transition("verify_result", None)  # End node
-        graph.add_transition("rollback_changes", None)  # End node
+        graph.set_start_nodes(["validate_parameters"])
+        graph.add_transition("validate_parameters", ["generate_script"])
+        graph.add_transition("generate_script", ["validate_script"])
+        graph.add_transition("validate_script", ["run_script"])
+        graph.add_transition("run_script", ["verify_result"])
+        graph.add_transition("verify_result", [])  # End node
+        graph.add_transition("rollback_changes", [])  # End node
+        
+        # Define parallel execution groups for better performance
+        graph.add_parallel_group("validation", ["validate_parameters", "validate_script"])
         
         return graph
     
@@ -129,7 +193,10 @@ class WorkflowAgent(AbstractWorkflowAgent):
             "error_handling",
             "automatic_rollback",
             "execution_history",
-            "integration_handling"
+            "integration_handling",
+            "multi_integration_support",
+            "concurrent_execution",
+            "resource_management"
         ]
     
     async def invoke(self, input_state: AgentState, config: Optional[Dict[str, Any]] = None) -> AgentResult:
@@ -147,17 +214,31 @@ class WorkflowAgent(AbstractWorkflowAgent):
             
             # Apply parameter schema if not provided
             if "target_name" in state_dict and "parameter_schema" not in state_dict:
+                category = state_dict.get("integration_category")
                 target = state_dict["target_name"]
-                if target in parameter_schemas:
-                    state_dict["parameter_schema"] = parameter_schemas[target]
+                schema = get_schema(category, target)
+                
+                if schema:
+                    state_dict["parameter_schema"] = schema
                     logger.debug(f"Applied parameter schema for target: {target}")
             
-            # Validate integration type
+            # Validate integration type and category
             if "integration_type" in state_dict:
                 integration_type = state_dict["integration_type"]
-                valid_types = ["infra_agent", "aws", "azure", "gcp", "apm", "browser", "custom"]
-                if integration_type not in valid_types:
-                    raise ValidationError(f"Invalid integration_type: {integration_type}. Valid types are: {', '.join(valid_types)}")
+                
+                # If using default integration_type, find the best match
+                if integration_type == "infra_agent":
+                    if "target_name" in state_dict:
+                        best_match = IntegrationRegistry.get_best_integration_for_target(state_dict["target_name"])
+                        if best_match:
+                            integration_name, metadata = best_match
+                            state_dict["integration_type"] = integration_name
+                            
+                            # Set category if not already set
+                            if "integration_category" not in state_dict or not state_dict["integration_category"]:
+                                state_dict["integration_category"] = metadata.category
+                            
+                            logger.info(f"Using integration {integration_name} for target {state_dict['target_name']}")
             
             # Handle special commands
             special_command = state_dict.get("special_command")
@@ -191,8 +272,39 @@ class WorkflowAgent(AbstractWorkflowAgent):
     async def _handle_retrieve_docs(self, state_dict: Dict[str, Any]) -> Dict[str, Any]:
         """Handle documentation retrieval command."""
         logger.info(f"Handling special command: retrieve_docs for {state_dict.get('target_name')}")
-        docs = f"# Documentation for {state_dict.get('action', 'default')} on {state_dict.get('target_name', 'default')}\n"
-        docs += "\nThis is a placeholder for more comprehensive documentation that could be generated dynamically."
+        
+        # Get integration metadata
+        target = state_dict.get('target_name', '')
+        category = state_dict.get('integration_category')
+        best_match = IntegrationRegistry.get_best_integration_for_target(target)
+        
+        if best_match:
+            integration_name, metadata = best_match
+            docs = f"# Documentation for {state_dict.get('action', 'default')} on {target}\n\n"
+            docs += f"## Integration: {integration_name}\n\n"
+            docs += f"Category: {metadata.category}\n"
+            docs += f"Version: {metadata.version}\n\n"
+            docs += f"{metadata.description}\n\n"
+            
+            # Include parameter documentation
+            if metadata.parameters:
+                docs += "## Parameters\n\n"
+                for name, param in metadata.parameters.items():
+                    required = "Required" if param.get("required", False) else "Optional"
+                    default = f" (Default: {param.get('default')})" if param.get("default") is not None else ""
+                    docs += f"- **{name}** ({param.get('type', 'string')}): {required}{default}\n  {param.get('description', '')}\n\n"
+            
+            # Include target documentation
+            docs += f"## Supported Targets\n\n"
+            for target in metadata.targets[:10]:  # Limit to first 10 targets
+                docs += f"- {target}\n"
+            
+            if len(metadata.targets) > 10:
+                docs += f"...and {len(metadata.targets) - 10} more\n"
+        else:
+            docs = f"# Documentation for {state_dict.get('action', 'default')} on {state_dict.get('target_name', 'default')}\n"
+            docs += "\nNo detailed documentation available for this target.\n"
+        
         return {"docs": docs, "messages": state_dict.get("messages", [])}
     
     async def _handle_dry_run(self, state_dict: Dict[str, Any], config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -250,6 +362,8 @@ class WorkflowAgent(AbstractWorkflowAgent):
             return await validate_parameters(state, config)
         except ImportError:
             logger.warning("Using fallback parameter validation")
+            
+            # Ensure parameters is a dictionary
             if not state.parameters:
                 state.parameters = {}
             
@@ -262,11 +376,41 @@ class WorkflowAgent(AbstractWorkflowAgent):
                 # Check for missing required parameters
                 missing = []
                 for key, spec in state.parameter_schema.items():
-                    if getattr(spec, "required", False) and key not in state.parameters:
+                    if spec.required and key not in state.parameters:
                         missing.append(key)
                 
                 if missing:
                     return {"error": f"Missing required parameters: {', '.join(missing)}"}
+                
+                # Validate parameter values
+                for name, value in state.parameters.items():
+                    if name in state.parameter_schema:
+                        spec = state.parameter_schema[name]
+                        
+                        # Type checks
+                        if spec.type == "integer" and not isinstance(value, int):
+                            try:
+                                state.parameters[name] = int(value)
+                            except (ValueError, TypeError):
+                                return {"error": f"Parameter '{name}' should be an integer."}
+                        elif spec.type == "number" and not isinstance(value, (int, float)):
+                            try:
+                                state.parameters[name] = float(value)
+                            except (ValueError, TypeError):
+                                return {"error": f"Parameter '{name}' should be a number."}
+                        elif spec.type == "boolean" and not isinstance(value, bool):
+                            if isinstance(value, str):
+                                if value.lower() in ("true", "yes", "1", "y"):
+                                    state.parameters[name] = True
+                                elif value.lower() in ("false", "no", "0", "n"):
+                                    state.parameters[name] = False
+                                else:
+                                    return {"error": f"Parameter '{name}' should be a boolean."}
+                            else:
+                                try:
+                                    state.parameters[name] = bool(value)
+                                except (ValueError, TypeError):
+                                    return {"error": f"Parameter '{name}' should be a boolean."}
             
             logger.info("Parameter validation passed successfully")
             
@@ -314,11 +458,15 @@ class WorkflowAgent(AbstractWorkflowAgent):
             # Initialize database connection
             await self.history_manager.initialize()
             
+            # Initialize recovery manager
+            await self.recovery_manager.initialize(config)
+            
             # Load parameter schemas from files
             if config and "configurable" in config and "template_dir" in config["configurable"]:
                 schema_dir = os.path.join(config["configurable"]["template_dir"], "schemas")
                 if os.path.exists(schema_dir):
-                    load_parameter_schemas(schema_dir)
+                    from .config.schemas import load_parameter_schemas
+                    load_parameter_schemas([schema_dir])
                 else:
                     logger.warning(f"Schema directory not found: {schema_dir}")
             
@@ -334,6 +482,9 @@ class WorkflowAgent(AbstractWorkflowAgent):
             # Initialize script executor
             if hasattr(self, 'script_executor'):
                 await self.script_executor.initialize(config)
+            
+            # Reload templates
+            reload_templates()
             
             logger.info(f"{self.name} initialization completed successfully")
             

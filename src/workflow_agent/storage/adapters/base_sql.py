@@ -3,6 +3,7 @@ import json
 import datetime
 import asyncio
 import logging
+from abc import abstractmethod
 from typing import Dict, Any, List, Optional
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker

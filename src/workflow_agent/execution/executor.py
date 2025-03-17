@@ -9,28 +9,288 @@ import logging
 import shutil
 import asyncio
 import json
-from typing import Dict, Any, Optional, Tuple, List
+import threading
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
+from typing import Dict, Any, Optional, Tuple, List, Callable, Awaitable
 from pathlib import Path
 from ..core.state import WorkflowState, OutputData, ExecutionMetrics, Change
 from ..config.configuration import ensure_workflow_config
 from ..storage import HistoryManager
-from .isolation import get_isolation_method
+from .isolation import get_isolation_method, register_isolation_method
+from ..monitoring.metrics import MetricsCollector
 
 logger = logging.getLogger(__name__)
 
-class ScriptExecutor:
-    """Executes scripts with different isolation methods and captures metrics."""
+class ResourceLimiter:
+    """
+    Manages resource limits for script execution to prevent resource exhaustion.
+    """
+    def __init__(self, max_concurrent: int = 5, max_memory_mb: int = 1024, 
+                 cpu_limit: float = 0.8, timeout_factor: float = 1.5):
+        """Initialize resource limiter."""
+        self.max_concurrent = max_concurrent
+        self.max_memory_mb = max_memory_mb
+        self.cpu_limit = cpu_limit
+        self.timeout_factor = timeout_factor
+        self.semaphore = asyncio.Semaphore(max_concurrent)
+        self.active_executions = {}
+        self._lock = threading.Lock()
     
-    def __init__(self, history_manager: Optional[HistoryManager] = None, timeout: int = 300):
+    async def acquire(self, execution_id: str, estimated_duration: int = 0) -> bool:
+        """
+        Acquire resources for execution.
+        
+        Args:
+            execution_id: Unique ID for this execution
+            estimated_duration: Estimated duration in milliseconds
+            
+        Returns:
+            True if resources acquired, False otherwise
+        """
+        await self.semaphore.acquire()
+        
+        # Check system resources
+        if not self._check_system_resources():
+            self.semaphore.release()
+            return False
+        
+        # Register execution
+        with self._lock:
+            self.active_executions[execution_id] = {
+                "start_time": time.time(),
+                "estimated_duration": estimated_duration,
+                "timeout": time.time() + (estimated_duration / 1000 * self.timeout_factor)
+            }
+        
+        return True
+    
+    def release(self, execution_id: str) -> None:
+        """
+        Release resources for execution.
+        
+        Args:
+            execution_id: Execution ID to release
+        """
+        with self._lock:
+            if execution_id in self.active_executions:
+                del self.active_executions[execution_id]
+        
+        self.semaphore.release()
+    
+    def _check_system_resources(self) -> bool:
+        """
+        Check if system has enough resources.
+        
+        Returns:
+            True if resources available, False otherwise
+        """
+        try:
+            # Check memory
+            mem = psutil.virtual_memory()
+            if mem.available < self.max_memory_mb * 1024 * 1024:
+                logger.warning(f"Insufficient memory: {mem.available / (1024*1024):.1f}MB available")
+                return False
+            
+            # Check CPU
+            cpu = psutil.cpu_percent(interval=0.1) / 100
+            if cpu > self.cpu_limit:
+                logger.warning(f"High CPU usage: {cpu*100:.1f}%")
+                return False
+            
+            return True
+        except Exception as e:
+            logger.error(f"Error checking system resources: {e}")
+            return True  # Assume resources available on error
+    
+    async def monitor_executions(self) -> None:
+        """
+        Monitor active executions and kill those that exceed timeout.
+        Should be run in a separate task.
+        """
+        while True:
+            try:
+                now = time.time()
+                to_kill = []
+                
+                with self._lock:
+                    for execution_id, info in self.active_executions.items():
+                        if now > info["timeout"]:
+                            to_kill.append(execution_id)
+                
+                for execution_id in to_kill:
+                    logger.warning(f"Execution {execution_id} exceeded timeout, killing")
+                    # The process termination should be handled by the executor
+                    with self._lock:
+                        if execution_id in self.active_executions:
+                            del self.active_executions[execution_id]
+            
+            except Exception as e:
+                logger.error(f"Error in execution monitor: {e}")
+            
+            await asyncio.sleep(5)  # Check every 5 seconds
+
+class ExecutionCache:
+    """
+    Caches execution results to avoid duplicate execution.
+    """
+    def __init__(self, max_size: int = 100, ttl: int = 3600):
+        """Initialize execution cache."""
+        self.max_size = max_size
+        self.ttl = ttl  # Time to live in seconds
+        self.cache = {}
+        self._lock = threading.Lock()
+    
+    def get(self, key: str) -> Optional[Dict[str, Any]]:
+        """
+        Get cached result for key.
+        
+        Args:
+            key: Cache key
+            
+        Returns:
+            Cached result or None if not found
+        """
+        with self._lock:
+            if key in self.cache:
+                entry = self.cache[key]
+                if time.time() < entry["expiry"]:
+                    return entry["result"]
+                else:
+                    del self.cache[key]
+        
+        return None
+    
+    def put(self, key: str, result: Dict[str, Any]) -> None:
+        """
+        Cache execution result.
+        
+        Args:
+            key: Cache key
+            result: Execution result to cache
+        """
+        with self._lock:
+            # Expire old entries if cache full
+            if len(self.cache) >= self.max_size:
+                now = time.time()
+                expired = [k for k, v in self.cache.items() if now >= v["expiry"]]
+                
+                # Remove expired entries
+                for k in expired:
+                    del self.cache[k]
+                
+                # If still full, remove oldest entry
+                if len(self.cache) >= self.max_size:
+                    oldest = min(self.cache.items(), key=lambda x: x[1]["expiry"])
+                    del self.cache[oldest[0]]
+            
+            self.cache[key] = {
+                "result": result,
+                "expiry": time.time() + self.ttl
+            }
+    
+    def invalidate(self, key: str) -> None:
+        """
+        Invalidate cache entry.
+        
+        Args:
+            key: Cache key to invalidate
+        """
+        with self._lock:
+            if key in self.cache:
+                del self.cache[key]
+    
+    def clear(self) -> None:
+        """Clear entire cache."""
+        with self._lock:
+            self.cache.clear()
+
+class ScriptExecutor:
+    """Enhanced executor that runs scripts with different isolation methods and captures metrics."""
+    
+    def __init__(
+        self, 
+        history_manager: Optional[HistoryManager] = None, 
+        timeout: int = 300,
+        max_concurrent: int = 10,
+        resource_limiter: Optional[ResourceLimiter] = None
+    ):
         """
         Initialize the script executor.
         
         Args:
             history_manager: Optional history manager for recording execution history
-            timeout: Timeout for script execution
+            timeout: Default timeout for script execution in seconds
+            max_concurrent: Maximum concurrent executions
+            resource_limiter: Optional resource limiter
         """
         self.history_manager = history_manager or HistoryManager()
         self.timeout = timeout
+        self.resource_limiter = resource_limiter or ResourceLimiter(max_concurrent=max_concurrent)
+        self.metrics_collector = MetricsCollector()
+        self.execution_cache = ExecutionCache()
+        
+        # Initialize thread and process pools with error handling
+        try:
+            self.thread_pool = ThreadPoolExecutor(max_workers=max_concurrent)
+            self.process_pool = ProcessPoolExecutor(max_workers=max(1, max_concurrent // 2))
+        except Exception as e:
+            logger.error(f"Failed to initialize execution pools: {e}")
+            # Fallback to single worker if pool creation fails
+            self.thread_pool = ThreadPoolExecutor(max_workers=1)
+            self.process_pool = ProcessPoolExecutor(max_workers=1)
+        
+        self.monitor_task = None
+        self._cleanup_lock = threading.Lock()
+    
+    async def initialize(self, config: Optional[Dict[str, Any]] = None) -> None:
+        """
+        Initialize the executor.
+        
+        Args:
+            config: Optional configuration
+        """
+        # Start resource monitor
+        if self.monitor_task is None:
+            self.monitor_task = asyncio.create_task(self.resource_limiter.monitor_executions())
+        
+        # Initialize isolation methods
+        workflow_config = ensure_workflow_config(config)
+        if workflow_config.isolation_method and workflow_config.use_isolation:
+            # Pre-check if isolation method is available
+            isolation_method = get_isolation_method(workflow_config.isolation_method)
+            if not isolation_method:
+                logger.warning(f"Isolation method {workflow_config.isolation_method} not available")
+    
+    async def cleanup(self) -> None:
+        """Cleanup resources."""
+        with self._cleanup_lock:
+            # Cancel monitor task
+            if self.monitor_task:
+                self.monitor_task.cancel()
+                try:
+                    await self.monitor_task
+                except asyncio.CancelledError:
+                    pass
+                self.monitor_task = None
+            
+            # Shutdown thread and process pools with error handling
+            try:
+                self.thread_pool.shutdown(wait=False)
+                self.process_pool.shutdown(wait=False)
+            except Exception as e:
+                logger.error(f"Error during pool shutdown: {e}")
+                # Force shutdown if normal shutdown fails
+                try:
+                    self.thread_pool._threads.clear()
+                    self.process_pool._processes.clear()
+                except:
+                    pass
+            
+            # Clear cache
+            try:
+                self.execution_cache.clear()
+            except Exception as e:
+                logger.error(f"Error clearing execution cache: {e}")
     
     async def run_script(
         self,
@@ -59,8 +319,28 @@ class ScriptExecutor:
         error_message = None
         process = None
         transaction_id = state.transaction_id or str(uuid.uuid4())
+        execution_id = str(uuid.uuid4())
+        
+        # Generate cache key
+        cache_key = self._generate_cache_key(state)
+        
+        # Check cache
+        if cache_key and not state.parameters.get("force_execution", False):
+            cached_result = self.execution_cache.get(cache_key)
+            if cached_result:
+                logger.info(f"Using cached result for {state.target_name}")
+                # Add transaction ID and execution ID to result
+                cached_result["transaction_id"] = transaction_id
+                cached_result["execution_id"] = execution_id
+                return cached_result
         
         try:
+            # Acquire resources
+            estimated_duration = workflow_config.execution_timeout
+            if not await self.resource_limiter.acquire(execution_id, estimated_duration):
+                logger.error("Failed to acquire resources for execution")
+                return {"error": "System resources exhausted, try again later."}
+            
             # Write script to temp file
             with open(script_path, 'w') as f:
                 f.write(state.script)
@@ -68,25 +348,42 @@ class ScriptExecutor:
             os.chmod(script_path, 0o755)
             logger.info(f"Prepared script at {script_path}")
             
-            # Capture initial metrics
+            # Capture initial metrics with error handling
             start_time = time.time()
+            metrics_data = {
+                "start_cpu": 0,
+                "start_memory": 0,
+                "start_io": None,
+                "start_network": None,
+                "end_cpu": 0,
+                "end_memory": 0,
+                "end_io": None,
+                "end_network": None
+            }
+            
             try:
-                start_cpu = psutil.cpu_percent(interval=0.1)
-                start_memory = psutil.virtual_memory().used
+                metrics_data["start_cpu"] = psutil.cpu_percent(interval=0.1)
+                metrics_data["start_memory"] = psutil.virtual_memory().used
                 try:
-                    start_io = psutil.disk_io_counters()
-                    start_network = psutil.net_io_counters()
-                except:
-                    start_io = None
-                    start_network = None
+                    metrics_data["start_io"] = psutil.disk_io_counters()
+                    metrics_data["start_network"] = psutil.net_io_counters()
+                except Exception as e:
+                    logger.warning(f"Failed to get initial IO/network metrics: {e}")
             except Exception as e:
                 logger.warning(f"Failed to get initial system metrics: {e}")
-                start_cpu = 0
-                start_memory = 0
-                start_io = None
-                start_network = None
             
             logger.info(f"Starting script execution: {script_path}")
+            
+            # Record workflow execution start in metrics with error handling
+            try:
+                self.metrics_collector.record_workflow_execution(
+                    status="running",
+                    target=state.target_name,
+                    action=state.action,
+                    duration=0
+                )
+            except Exception as e:
+                logger.warning(f"Failed to record workflow execution start: {e}")
             
             # Determine isolation method
             isolation_method = state.isolation_method or workflow_config.isolation_method
@@ -111,34 +408,55 @@ class ScriptExecutor:
             
             success, stdout_str, stderr_str, exit_code, error_message = result
             
-            # Capture final metrics
+            # Capture final metrics with error handling
             end_time = time.time()
+            execution_time_sec = end_time - start_time
+            execution_time = int(execution_time_sec * 1000)  # Convert to ms
+            
             try:
-                end_cpu = psutil.cpu_percent(interval=0.1)
-                end_memory = psutil.virtual_memory().used
+                metrics_data["end_cpu"] = psutil.cpu_percent(interval=0.1)
+                metrics_data["end_memory"] = psutil.virtual_memory().used
                 try:
-                    end_io = psutil.disk_io_counters()
-                    end_network = psutil.net_io_counters()
-                except:
-                    end_io = None
-                    end_network = None
+                    metrics_data["end_io"] = psutil.disk_io_counters()
+                    metrics_data["end_network"] = psutil.net_io_counters()
+                except Exception as e:
+                    logger.warning(f"Failed to get final IO/network metrics: {e}")
             except Exception as e:
                 logger.warning(f"Failed to get final system metrics: {e}")
-                end_cpu = 0
-                end_memory = 0
-                end_io = None
-                end_network = None
             
-            # Calculate metrics
-            execution_time = int((end_time - start_time) * 1000)
-            cpu_usage = (start_cpu + end_cpu) / 2
-            memory_usage = max(0, end_memory - start_memory)
+            # Record workflow execution completion in metrics with error handling
+            try:
+                self.metrics_collector.record_workflow_execution(
+                    status="completed" if success else "failed",
+                    target=state.target_name,
+                    action=state.action,
+                    duration=execution_time_sec
+                )
+            except Exception as e:
+                logger.warning(f"Failed to record workflow execution completion: {e}")
             
-            # Calculate IO and network metrics if available
-            io_read = end_io.read_bytes - start_io.read_bytes if end_io and start_io else None
-            io_write = end_io.write_bytes - start_io.write_bytes if end_io and start_io else None
-            network_tx = end_network.bytes_sent - start_network.bytes_sent if end_network and start_network else None
-            network_rx = end_network.bytes_recv - start_network.bytes_recv if end_network and start_network else None
+            # Calculate metrics with error handling
+            try:
+                cpu_usage = (metrics_data["start_cpu"] + metrics_data["end_cpu"]) / 2
+                memory_usage = max(0, metrics_data["end_memory"] - metrics_data["start_memory"])
+                
+                # Calculate IO and network metrics if available
+                io_read = (metrics_data["end_io"].read_bytes - metrics_data["start_io"].read_bytes 
+                          if metrics_data["end_io"] and metrics_data["start_io"] else None)
+                io_write = (metrics_data["end_io"].write_bytes - metrics_data["start_io"].write_bytes 
+                           if metrics_data["end_io"] and metrics_data["start_io"] else None)
+                network_tx = (metrics_data["end_network"].bytes_sent - metrics_data["start_network"].bytes_sent 
+                            if metrics_data["end_network"] and metrics_data["start_network"] else None)
+                network_rx = (metrics_data["end_network"].bytes_recv - metrics_data["start_network"].bytes_recv 
+                            if metrics_data["end_network"] and metrics_data["start_network"] else None)
+            except Exception as e:
+                logger.warning(f"Failed to calculate metrics: {e}")
+                cpu_usage = None
+                memory_usage = None
+                io_read = None
+                io_write = None
+                network_tx = None
+                network_rx = None
             
             metrics = ExecutionMetrics(
                 start_time=start_time,
@@ -192,7 +510,7 @@ class ScriptExecutor:
             # Save execution history
             try:
                 if self.history_manager:
-                    execution_id = await self.history_manager.save_execution(
+                    record_id = await self.history_manager.save_execution(
                         target_name=state.target_name,
                         action=state.action,
                         success=success,
@@ -205,16 +523,18 @@ class ScriptExecutor:
                         transaction_id=transaction_id,
                         user_id=workflow_config.user_id
                     )
-                    logger.info(f"Saved execution record with ID {execution_id}")
+                    logger.info(f"Saved execution record with ID {record_id}")
+                    execution_id = record_id
                 else:
                     execution_id = None
             except Exception as e:
                 logger.error(f"Failed to save execution record: {e}")
                 execution_id = None
             
+            result_dict = {}
             if success:
                 logger.info(f"Script executed successfully for {state.action} on {state.target_name}")
-                return {
+                result_dict = {
                     "output": output,
                     "status": f"Script executed successfully for {state.action} on {state.target_name}",
                     "changes": changes,
@@ -225,7 +545,7 @@ class ScriptExecutor:
                 }
             else:
                 logger.error(f"Script execution failed: {error_message}")
-                return {
+                result_dict = {
                     "error": error_message or "Script execution failed",
                     "output": output,
                     "metrics": metrics,
@@ -234,15 +554,30 @@ class ScriptExecutor:
                     "changes": changes,
                     "legacy_changes": [change.details for change in changes]
                 }
+            
+            # Cache successful results
+            if success and cache_key:
+                self.execution_cache.put(cache_key, result_dict)
+            
+            return result_dict
+            
         except Exception as err:
             error_message = str(err)
             logger.exception(f"Script execution failed with exception: {error_message}")
             end_time = time.time()
             execution_time = int((end_time - (state.metrics.start_time if state.metrics and state.metrics.start_time else end_time)) * 1000)
             
+            # Record execution failure in metrics
+            self.metrics_collector.record_workflow_execution(
+                status="failed",
+                target=state.target_name,
+                action=state.action,
+                duration=end_time - (state.metrics.start_time if state.metrics and state.metrics.start_time else end_time)
+            )
+            
             try:
                 if self.history_manager:
-                    execution_id = await self.history_manager.save_execution(
+                    record_id = await self.history_manager.save_execution(
                         target_name=state.target_name,
                         action=state.action,
                         success=False,
@@ -254,10 +589,10 @@ class ScriptExecutor:
                         user_id=workflow_config.user_id
                     )
                 else:
-                    execution_id = None
+                    record_id = None
             except Exception as e:
                 logger.error(f"Failed to save execution record for error: {e}")
-                execution_id = None
+                record_id = None
             
             return {
                 "error": f"Script execution failed: {error_message}",
@@ -269,7 +604,7 @@ class ScriptExecutor:
                     cpu_usage=None,
                     memory_usage=None
                 ),
-                "execution_id": execution_id,
+                "execution_id": record_id,
                 "transaction_id": transaction_id,
                 "changes": [Change(
                     type="attempt",
@@ -280,6 +615,10 @@ class ScriptExecutor:
                 "legacy_changes": [f"Attempted {state.action} on {state.target_name}"]
             }
         finally:
+            # Release resources
+            self.resource_limiter.release(execution_id)
+            
+            # Cleanup temporary files
             if process and process.poll() is None:
                 try:
                     process.kill()
@@ -356,119 +695,176 @@ class ScriptExecutor:
                         ))
         
         return changes
-
-    def _kill_process_tree(self, pid: int) -> None:
-        """Kill a process and all its children."""
-        try:
-            parent = psutil.Process(pid)
-            children = parent.children(recursive=True)
-            
-            for child in children:
-                try:
-                    child.kill()
-                except psutil.NoSuchProcess:
-                    pass
-                    
-            parent.kill()
-        except psutil.NoSuchProcess:
-            pass
-            
-    def _sanitize_command(self, command: str) -> str:
-        """Sanitize command to prevent shell injection."""
-        # Remove any shell metacharacters
-        command = command.replace(';', '').replace('&&', '').replace('||', '')
-        # Remove any command substitution
-        command = command.replace('$(', '').replace('`', '')
-        return command.strip()
-        
-    async def execute(
-        self,
-        script_path: str,
-        env: Optional[Dict[str, str]] = None,
-        cwd: Optional[str] = None
-    ) -> Dict[str, Any]:
+    
+    def _generate_cache_key(self, state: WorkflowState) -> Optional[str]:
         """
-        Execute a script and capture metrics.
+        Generate cache key for state.
         
         Args:
-            script_path: Path to the script to execute
-            env: Optional environment variables
-            cwd: Optional working directory
+            state: Workflow state
             
         Returns:
-            Dictionary containing execution results and metrics
+            Cache key or None if caching not applicable
         """
-        start_time = time.time()
-        process = None
-        output = []
-        error = []
+        # Skip caching for certain actions
+        if state.action in ["verify", "test", "debug"]:
+            return None
         
-        try:
-            # Validate script path
-            if not os.path.exists(script_path):
-                raise FileNotFoundError(f"Script not found: {script_path}")
-                
-            # Sanitize working directory
-            if cwd and not os.path.exists(cwd):
-                raise FileNotFoundError(f"Working directory not found: {cwd}")
-                
-            # Prepare environment
-            process_env = os.environ.copy()
-            if env:
-                process_env.update(env)
-                
-            # Start process
-            process = subprocess.Popen(
-                [script_path],
-                env=process_env,
-                cwd=cwd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                shell=False  # Prevent shell injection
-            )
+        # Skip caching if explicitly disabled
+        if state.parameters.get("skip_cache", False):
+            return None
+        
+        # Generate hash of relevant state parts
+        key_parts = [
+            state.target_name,
+            state.action,
+            state.integration_type
+        ]
+        
+        # Add parameter hash
+        param_str = json.dumps(state.parameters, sort_keys=True)
+        
+        # Generate key
+        import hashlib
+        hash_obj = hashlib.sha256()
+        hash_obj.update(":".join(key_parts).encode('utf-8'))
+        hash_obj.update(param_str.encode('utf-8'))
+        
+        return hash_obj.hexdigest()
+    
+    async def run_scripts_batch(
+        self, 
+        states: List[WorkflowState],
+        config: Optional[Dict[str, Any]] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Run multiple scripts in parallel.
+        
+        Args:
+            states: List of workflow states
+            config: Optional configuration
             
-            # Wait for completion with timeout
-            try:
-                stdout, stderr = process.communicate(timeout=self.timeout)
-                output = stdout.splitlines()
-                error = stderr.splitlines()
-            except subprocess.TimeoutExpired:
-                self._kill_process_tree(process.pid)
-                raise TimeoutError(f"Script execution timed out after {self.timeout} seconds")
+        Returns:
+            List of execution results
+        """
+        tasks = [self.run_script(state, config) for state in states]
+        return await asyncio.gather(*tasks)
+    
+    async def run_script_group(
+        self,
+        states: List[WorkflowState],
+        config: Optional[Dict[str, Any]] = None,
+        fail_fast: bool = False
+    ) -> Dict[str, Any]:
+        """
+        Run a group of scripts with dependency tracking.
+        
+        Args:
+            states: List of workflow states
+            config: Optional configuration
+            fail_fast: Whether to stop on first failure
+            
+        Returns:
+            Dict with group execution results
+        """
+        results = {}
+        failed = False
+        
+        # Sort states by dependencies
+        sorted_states = self._sort_states_by_dependencies(states)
+        
+        for state in sorted_states:
+            if failed and fail_fast:
+                results[state.target_name] = {
+                    "error": "Skipped due to previous failure",
+                    "skipped": True
+                }
+                continue
+            
+            result = await self.run_script(state, config)
+            results[state.target_name] = result
+            
+            if "error" in result:
+                failed = True
+        
+        return {
+            "results": results,
+            "success": not failed,
+            "failed_targets": [target for target, result in results.items() if "error" in result],
+            "succeeded_targets": [target for target, result in results.items() if "error" not in result]
+        }
+    
+    def _sort_states_by_dependencies(self, states: List[WorkflowState]) -> List[WorkflowState]:
+        """
+        Sort states by dependencies to ensure correct execution order.
+        
+        Args:
+            states: List of workflow states
+            
+        Returns:
+            Sorted list of states
+        """
+        # Build dependency graph
+        graph = {}
+        for state in states:
+            target = state.target_name
+            if target not in graph:
+                graph[target] = set()
+            
+            # Add dependencies
+            if hasattr(state, 'dependencies') and state.dependencies:
+                for dep in state.dependencies:
+                    if dep not in graph:
+                        graph[dep] = set()
+                    graph[target].add(dep)
+        
+        # Topological sort with cycle detection
+        sorted_targets = []
+        visited = set()
+        temp_visited = set()
+        cycle_path = []
+        
+        def visit(target):
+            if target in temp_visited:
+                # Cycle detected - log the full cycle path
+                cycle_start = cycle_path.index(target)
+                cycle = cycle_path[cycle_start:] + [target]
+                logger.error(f"Dependency cycle detected: {' -> '.join(cycle)}")
+                # Break the cycle by removing the last dependency
+                if target in graph and cycle[-2] in graph[target]:
+                    graph[target].remove(cycle[-2])
+                    logger.info(f"Breaking cycle by removing dependency {cycle[-2]} from {target}")
+                return
+            
+            if target not in visited:
+                temp_visited.add(target)
+                cycle_path.append(target)
                 
-            # Check return code
-            if process.returncode != 0:
-                raise subprocess.CalledProcessError(
-                    process.returncode,
-                    script_path,
-                    stdout=stdout,
-                    stderr=stderr
-                )
+                # Visit dependencies
+                for dep in sorted(graph.get(target, [])):
+                    visit(dep)
                 
-            execution_time = time.time() - start_time
-            
-            return {
-                "success": True,
-                "execution_time": round(execution_time, 2),
-                "output": output,
-                "error": error,
-                "return_code": process.returncode
-            }
-            
-        except Exception as e:
-            logger.error(f"Error executing script {script_path}: {str(e)}")
-            if process:
-                self._kill_process_tree(process.pid)
-            return {
-                "success": False,
-                "execution_time": round(time.time() - start_time, 2),
-                "output": output,
-                "error": [str(e)] + error,
-                "return_code": process.returncode if process else -1
-            }
-            
-        finally:
-            # Ensure process is terminated
-            if process and process.poll() is None:
-                self._kill_process_tree(process.pid)
+                cycle_path.pop()
+                temp_visited.remove(target)
+                visited.add(target)
+                sorted_targets.append(target)
+        
+        # Visit all targets
+        for target in sorted(graph.keys()):
+            if target not in visited:
+                visit(target)
+        
+        # Sort states based on target order
+        target_to_state = {state.target_name: state for state in states}
+        sorted_states = []
+        
+        for target in sorted_targets:
+            if target in target_to_state:
+                sorted_states.append(target_to_state[target])
+        
+        # Add any states not in the dependency graph
+        for state in states:
+            if state.target_name not in sorted_targets:
+                sorted_states.append(state)
+        
+        return sorted_states

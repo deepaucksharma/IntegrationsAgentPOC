@@ -26,6 +26,25 @@ class RecoveryManager:
         """
         self.history_manager = history_manager or HistoryManager()
     
+    async def initialize(self, config: Optional[Dict[str, Any]] = None) -> None:
+        """
+        Initialize the recovery manager with configuration.
+        
+        Args:
+            config: Optional configuration dictionary
+        """
+        logger.info("Initializing recovery manager")
+        if self.history_manager:
+            await self.history_manager.initialize(config)
+    
+    async def cleanup(self) -> None:
+        """
+        Clean up resources used by the recovery manager.
+        """
+        logger.info("Cleaning up recovery manager")
+        if self.history_manager:
+            await self.history_manager.cleanup()
+    
     async def rollback_changes(
         self,
         state: WorkflowState,
