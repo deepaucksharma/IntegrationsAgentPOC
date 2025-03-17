@@ -1,8 +1,8 @@
 import abc
 from typing import Any, Dict, List, Optional
 
-class BaseAgent(abc.ABC):
-    """Abstract Base Agent class for workflow orchestration."""
+class AbstractWorkflowAgent(abc.ABC):
+    """Abstract base class for all workflow agents in the system."""
     
     def __init__(self, name: str, description: str):
         self.name = name

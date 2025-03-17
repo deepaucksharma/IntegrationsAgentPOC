@@ -2,11 +2,14 @@ import os
 import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, validator
 import yaml
 import json
 
 logger = logging.getLogger(__name__)
+
+# Valid isolation methods
+VALID_ISOLATION_METHODS = {"docker", "chroot", "venv", "none"}
 
 class WorkflowConfiguration(BaseModel):
     """Configuration for the workflow agent."""
@@ -31,11 +34,23 @@ class WorkflowConfiguration(BaseModel):
     sandbox_isolation: bool = False  # Added: for stronger isolation
     log_level: str = "INFO"
     
+    @validator('isolation_method')
+    def validate_isolation_method(cls, v):
+        if v not in VALID_ISOLATION_METHODS:
+            raise ValueError(f"Invalid isolation method: {v}. Must be one of {', '.join(VALID_ISOLATION_METHODS)}")
+        return v
+    
+    @validator('use_isolation', 'sandbox_isolation')
+    def validate_isolation_settings(cls, v, values):
+        if v and values.get('isolation_method') == 'none':
+            raise ValueError("Cannot use isolation with isolation_method='none'")
+        return v
+    
     class Config:
         """Configuration for the model."""
         extra = "allow"  # Allow extra fields for extensions
 
-def ensure_workflow_config(config: Dict[str, Any] = None) -> WorkflowConfiguration:
+def ensure_workflow_config(config: Optional[Dict[str, Any]] = None) -> WorkflowConfiguration:
     """
     Ensure a valid workflow configuration exists.
     
@@ -44,13 +59,37 @@ def ensure_workflow_config(config: Dict[str, Any] = None) -> WorkflowConfigurati
         
     Returns:
         Validated WorkflowConfiguration object
+        
+    Raises:
+        ValueError: If configuration is invalid
     """
+    if config is None:
+        config = {}
+    
     try:
-        if config and "configurable" in config:
-            return WorkflowConfiguration(**config["configurable"])
+        # Handle nested config structure
+        if "configurable" in config:
+            config = config["configurable"]
+        
+        # Validate isolation settings
+        if config.get("use_isolation", True):
+            isolation_method = config.get("isolation_method")
+            if not isolation_method:
+                logger.warning(
+                    "Isolation requested but no isolation method specified. "
+                    "This may lead to direct execution without isolation. "
+                    "Consider specifying an isolation method or explicitly setting use_isolation=False."
+                )
+            elif isolation_method not in VALID_ISOLATION_METHODS:
+                raise ValueError(
+                    f"Invalid isolation method: {isolation_method}. "
+                    f"Must be one of {', '.join(VALID_ISOLATION_METHODS)}"
+                )
+        
+        return WorkflowConfiguration(**config)
     except Exception as e:
-        logger.warning(f"Error in configuration: {e}. Using defaults.")
-    return WorkflowConfiguration()
+        logger.error(f"Configuration validation failed: {e}")
+        raise ValueError(f"Invalid configuration: {e}") from e
 
 # Global verification commands for supported targets/actions.
 verification_commands: Dict[str, str] = {

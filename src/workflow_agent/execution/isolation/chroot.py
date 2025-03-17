@@ -2,6 +2,7 @@ import os
 import subprocess
 import logging
 import shutil
+import tempfile
 from typing import Tuple, Optional
 
 logger = logging.getLogger(__name__)
@@ -85,10 +86,17 @@ async def run_script_chroot(
         stderr_str = f"Chroot execution timed out after {timeout_ms}ms\n" + stderr_str
         error_message = stderr_str
         return False, stdout_str, stderr_str, 124, error_message
-    except Exception as err:
-        logger.exception(f"Error during chroot execution: {err}")
+    except (subprocess.SubprocessError, OSError) as err:
+        logger.error(f"Chroot execution failed: {err}")
+        logger.warning(
+            "Falling back to direct execution. This may pose security risks "
+            "as the script will run without isolation."
+        )
         from .direct import run_script_direct
         return await run_script_direct(script_path, timeout_ms)
+    except Exception as err:
+        logger.exception(f"Unexpected error during chroot execution: {err}")
+        raise  # Re-raise unexpected errors
     finally:
         # Clean up chroot environment
         try:

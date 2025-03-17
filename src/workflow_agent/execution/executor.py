@@ -21,14 +21,16 @@ logger = logging.getLogger(__name__)
 class ScriptExecutor:
     """Executes scripts with different isolation methods and captures metrics."""
     
-    def __init__(self, history_manager: Optional[HistoryManager] = None):
+    def __init__(self, history_manager: Optional[HistoryManager] = None, timeout: int = 300):
         """
         Initialize the script executor.
         
         Args:
             history_manager: Optional history manager for recording execution history
+            timeout: Timeout for script execution
         """
         self.history_manager = history_manager or HistoryManager()
+        self.timeout = timeout
     
     async def run_script(
         self,
@@ -354,3 +356,119 @@ class ScriptExecutor:
                         ))
         
         return changes
+
+    def _kill_process_tree(self, pid: int) -> None:
+        """Kill a process and all its children."""
+        try:
+            parent = psutil.Process(pid)
+            children = parent.children(recursive=True)
+            
+            for child in children:
+                try:
+                    child.kill()
+                except psutil.NoSuchProcess:
+                    pass
+                    
+            parent.kill()
+        except psutil.NoSuchProcess:
+            pass
+            
+    def _sanitize_command(self, command: str) -> str:
+        """Sanitize command to prevent shell injection."""
+        # Remove any shell metacharacters
+        command = command.replace(';', '').replace('&&', '').replace('||', '')
+        # Remove any command substitution
+        command = command.replace('$(', '').replace('`', '')
+        return command.strip()
+        
+    async def execute(
+        self,
+        script_path: str,
+        env: Optional[Dict[str, str]] = None,
+        cwd: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Execute a script and capture metrics.
+        
+        Args:
+            script_path: Path to the script to execute
+            env: Optional environment variables
+            cwd: Optional working directory
+            
+        Returns:
+            Dictionary containing execution results and metrics
+        """
+        start_time = time.time()
+        process = None
+        output = []
+        error = []
+        
+        try:
+            # Validate script path
+            if not os.path.exists(script_path):
+                raise FileNotFoundError(f"Script not found: {script_path}")
+                
+            # Sanitize working directory
+            if cwd and not os.path.exists(cwd):
+                raise FileNotFoundError(f"Working directory not found: {cwd}")
+                
+            # Prepare environment
+            process_env = os.environ.copy()
+            if env:
+                process_env.update(env)
+                
+            # Start process
+            process = subprocess.Popen(
+                [script_path],
+                env=process_env,
+                cwd=cwd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                shell=False  # Prevent shell injection
+            )
+            
+            # Wait for completion with timeout
+            try:
+                stdout, stderr = process.communicate(timeout=self.timeout)
+                output = stdout.splitlines()
+                error = stderr.splitlines()
+            except subprocess.TimeoutExpired:
+                self._kill_process_tree(process.pid)
+                raise TimeoutError(f"Script execution timed out after {self.timeout} seconds")
+                
+            # Check return code
+            if process.returncode != 0:
+                raise subprocess.CalledProcessError(
+                    process.returncode,
+                    script_path,
+                    stdout=stdout,
+                    stderr=stderr
+                )
+                
+            execution_time = time.time() - start_time
+            
+            return {
+                "success": True,
+                "execution_time": round(execution_time, 2),
+                "output": output,
+                "error": error,
+                "return_code": process.returncode
+            }
+            
+        except Exception as e:
+            logger.error(f"Error executing script {script_path}: {str(e)}")
+            if process:
+                self._kill_process_tree(process.pid)
+            return {
+                "success": False,
+                "execution_time": round(time.time() - start_time, 2),
+                "output": output,
+                "error": [str(e)] + error,
+                "return_code": process.returncode if process else -1
+            }
+            
+        finally:
+            # Ensure process is terminated
+            if process and process.poll() is None:
+                self._kill_process_tree(process.pid)

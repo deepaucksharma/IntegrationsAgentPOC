@@ -2,6 +2,9 @@ from abc import ABC, abstractmethod
 from typing import Dict, Any, List, Optional
 import logging
 import re
+from datetime import datetime
+from sqlalchemy import func
+from ..models import ExecutionRecord
 
 logger = logging.getLogger(__name__)
 
@@ -113,19 +116,23 @@ class BaseAdapter(ABC):
     @abstractmethod
     async def get_execution_history(
         self,
-        target: str,
-        action: str,
-        limit: int = 10,
-        user_id: str = None
+        target: str = None,
+        action: str = None,
+        limit: int = 100,
+        user_id: str = None,
+        start_time: datetime = None,
+        end_time: datetime = None
     ) -> List[Dict[str, Any]]:
         """
-        Get execution history for a specific target and action.
+        Get execution history with optional filters.
         
         Args:
-            target: Target name to filter by
-            action: Action to filter by
+            target: Optional target name filter
+            action: Optional action name filter
             limit: Maximum number of records to return
-            user_id: Optional user ID to filter by
+            user_id: Optional user ID filter
+            start_time: Optional start time filter
+            end_time: Optional end time filter
             
         Returns:
             List of execution records
@@ -143,20 +150,12 @@ class BaseAdapter(ABC):
         Get execution statistics for a specific target and action.
         
         Args:
-            target: Target name to filter by
-            action: Action to filter by
-            user_id: Optional user ID to filter by
+            target: Target name
+            action: Action name
+            user_id: Optional user ID
             
         Returns:
-            Dictionary with execution statistics including:
-            - total_executions: Total number of executions
-            - successful_executions: Number of successful executions
-            - failed_executions: Number of failed executions
-            - avg_execution_time: Average execution time in milliseconds
-            - success_rate: Percentage of successful executions
-            - last_execution_time: Timestamp of the last execution
-            - last_success_time: Timestamp of the last successful execution
-            - last_failure_time: Timestamp of the last failed execution
+            Dictionary containing execution statistics
         """
         pass
     
@@ -165,20 +164,20 @@ class BaseAdapter(ABC):
         self,
         target: str = None,
         action: str = None,
-        days: int = None,
-        user_id: str = None
+        user_id: str = None,
+        before_time: datetime = None
     ) -> int:
         """
-        Clear execution history records.
+        Clear execution history with optional filters.
         
         Args:
-            target: Optional target name to filter by
-            action: Optional action to filter by
-            days: Optional number of days to keep (older records will be deleted)
-            user_id: Optional user ID to filter by
+            target: Optional target name filter
+            action: Optional action name filter
+            user_id: Optional user ID filter
+            before_time: Optional time filter (clear records before this time)
             
         Returns:
-            Number of records deleted
+            Number of records cleared
         """
         pass
     

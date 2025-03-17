@@ -2,7 +2,7 @@ import logging
 import uuid
 import os
 from typing import Dict, Any, Optional, List
-from .core.agent import BaseAgent, AgentState, AgentResult
+from .core.agent import AbstractWorkflowAgent, AgentState, AgentResult
 from .workflow import WorkflowGraph, WorkflowExecutor
 from .config.configuration import ensure_workflow_config
 from .config.schemas import parameter_schemas, load_parameter_schemas
@@ -15,7 +15,7 @@ from .rollback import RecoveryManager
 
 logger = logging.getLogger(__name__)
 
-class WorkflowAgent(BaseAgent):
+class WorkflowAgent(AbstractWorkflowAgent):
     """An agent that orchestrates multi-step workflows with validation and rollback."""
     
     def __init__(self):
@@ -111,56 +111,71 @@ class WorkflowAgent(BaseAgent):
             
         Returns:
             Updated state dictionary after workflow execution
+            
+        Raises:
+            ValueError: If input state is invalid
+            RuntimeError: If workflow execution fails
         """
-        workflow_config = ensure_workflow_config(config)
-        state_dict = dict(input_state)
-        
-        logger.info(f"Invoking workflow agent for {state_dict.get('action', 'unknown')} on {state_dict.get('target_name', 'unknown')}")
-        
-        # Generate a transaction ID if not provided
-        if "transaction_id" not in state_dict:
-            state_dict["transaction_id"] = str(uuid.uuid4())
-            logger.info(f"Generated transaction ID: {state_dict['transaction_id']}")
-        
-        # Apply parameter schema if not provided
-        if "target_name" in state_dict and "parameter_schema" not in state_dict:
-            target = state_dict["target_name"]
-            if target in parameter_schemas:
-                state_dict["parameter_schema"] = parameter_schemas[target]
-                logger.debug(f"Applied parameter schema for target: {target}")
-        
-        # Validate integration type
-        if "integration_type" in state_dict:
-            integration_type = state_dict["integration_type"]
-            valid_types = ["infra_agent", "aws", "azure", "gcp", "apm", "browser", "custom"]
-            if integration_type not in valid_types:
-                error_msg = f"Invalid integration_type: {integration_type}. Valid types are: {', '.join(valid_types)}"
-                logger.error(error_msg)
-                return {"error": error_msg, "messages": input_state.get("messages", [])}
-        
-        # Handle special commands
-        special_command = state_dict.get("special_command")
-        if special_command == "retrieve_docs":
-            logger.info(f"Handling special command: retrieve_docs for {state_dict.get('target_name')}")
-            docs = f"# Documentation for {state_dict.get('action', 'default')} on {state_dict.get('target_name', 'default')}\n"
-            docs += "\nThis is a placeholder for more comprehensive documentation that could be generated dynamically."
-            return {"docs": docs, "messages": input_state.get("messages", [])}
-        elif special_command == "dry_run":
-            logger.info(f"Handling special command: dry_run for {state_dict.get('target_name')}")
-            partial_result = await self._partial_workflow(state_dict, config)
-            return {**partial_result, "messages": input_state.get("messages", [])}
-        
-        # Auto-prune history if configured
-        if workflow_config.prune_history_days:
-            await self.history_manager.auto_prune_history(workflow_config.prune_history_days)
-        
-        # Execute full workflow
-        logger.info("Executing full workflow")
-        
-        result = await self.workflow_executor.execute_workflow(state_dict, config)
-        
-        agent_result = {**result, "messages": input_state.get("messages", [])}
-        return agent_result
+        try:
+            workflow_config = ensure_workflow_config(config)
+            state_dict = dict(input_state)
+            
+            logger.info(f"Invoking workflow agent for {state_dict.get('action', 'unknown')} on {state_dict.get('target_name', 'unknown')}")
+            
+            # Generate a transaction ID if not provided
+            if "transaction_id" not in state_dict:
+                state_dict["transaction_id"] = str(uuid.uuid4())
+                logger.info(f"Generated transaction ID: {state_dict['transaction_id']}")
+            
+            # Apply parameter schema if not provided
+            if "target_name" in state_dict and "parameter_schema" not in state_dict:
+                target = state_dict["target_name"]
+                if target in parameter_schemas:
+                    state_dict["parameter_schema"] = parameter_schemas[target]
+                    logger.debug(f"Applied parameter schema for target: {target}")
+            
+            # Validate integration type
+            if "integration_type" in state_dict:
+                integration_type = state_dict["integration_type"]
+                valid_types = ["infra_agent", "aws", "azure", "gcp", "apm", "browser", "custom"]
+                if integration_type not in valid_types:
+                    error_msg = f"Invalid integration_type: {integration_type}. Valid types are: {', '.join(valid_types)}"
+                    logger.error(error_msg)
+                    return {"error": error_msg, "messages": input_state.get("messages", [])}
+            
+            # Handle special commands
+            special_command = state_dict.get("special_command")
+            if special_command == "retrieve_docs":
+                logger.info(f"Handling special command: retrieve_docs for {state_dict.get('target_name')}")
+                docs = f"# Documentation for {state_dict.get('action', 'default')} on {state_dict.get('target_name', 'default')}\n"
+                docs += "\nThis is a placeholder for more comprehensive documentation that could be generated dynamically."
+                return {"docs": docs, "messages": input_state.get("messages", [])}
+            elif special_command == "dry_run":
+                logger.info(f"Handling special command: dry_run for {state_dict.get('target_name')}")
+                partial_result = await self._partial_workflow(state_dict, config)
+                return {**partial_result, "messages": input_state.get("messages", [])}
+            
+            # Auto-prune history if configured
+            if workflow_config.prune_history_days:
+                await self.history_manager.auto_prune_history(workflow_config.prune_history_days)
+            
+            # Execute full workflow
+            logger.info("Executing full workflow")
+            
+            result = await self.workflow_executor.execute_workflow(state_dict, config)
+            
+            agent_result = {**result, "messages": input_state.get("messages", [])}
+            return agent_result
+            
+        except ValueError as e:
+            logger.error(f"Invalid input state or configuration: {e}")
+            return {"error": str(e), "messages": input_state.get("messages", [])}
+        except Exception as e:
+            logger.exception("Unexpected error during workflow execution")
+            return {"error": f"Workflow execution failed: {str(e)}", "messages": input_state.get("messages", [])}
+        finally:
+            # Ensure cleanup happens even if there's an error
+            await self.cleanup()
     
     async def _partial_workflow(
         self,
@@ -278,31 +293,73 @@ class WorkflowAgent(BaseAgent):
         
         Args:
             config: Optional configuration
+            
+        Raises:
+            RuntimeError: If initialization fails
         """
         logger.info(f"{self.name} initializing")
         
-        # Initialize database connection
-        await self.history_manager.initialize()
-        
-        # Load parameter schemas from files
-        if config and "configurable" in config and "template_dir" in config["configurable"]:
-            schema_dir = os.path.join(config["configurable"]["template_dir"], "schemas")
-            if os.path.exists(schema_dir):
-                load_parameter_schemas(schema_dir)
-        
-        # Load custom verification commands if available
-        if config and "configurable" in config and "template_dir" in config["configurable"]:
-            verification_dir = os.path.join(config["configurable"]["template_dir"], "verifications")
-            if os.path.exists(verification_dir):
-                from .config.configuration import load_verification_commands
-                load_verification_commands(verification_dir)
+        try:
+            # Validate configuration if provided
+            if config:
+                ensure_workflow_config(config)
+            
+            # Initialize database connection
+            await self.history_manager.initialize()
+            
+            # Load parameter schemas from files
+            if config and "configurable" in config and "template_dir" in config["configurable"]:
+                schema_dir = os.path.join(config["configurable"]["template_dir"], "schemas")
+                if os.path.exists(schema_dir):
+                    load_parameter_schemas(schema_dir)
+                else:
+                    logger.warning(f"Schema directory not found: {schema_dir}")
+            
+            # Load custom verification commands if available
+            if config and "configurable" in config and "template_dir" in config["configurable"]:
+                verification_dir = os.path.join(config["configurable"]["template_dir"], "verifications")
+                if os.path.exists(verification_dir):
+                    from .config.configuration import load_verification_commands
+                    load_verification_commands(verification_dir)
+                else:
+                    logger.warning(f"Verification directory not found: {verification_dir}")
+            
+            # Initialize script executor
+            if hasattr(self, 'script_executor'):
+                await self.script_executor.initialize(config)
+            
+            logger.info(f"{self.name} initialization completed successfully")
+            
+        except Exception as e:
+            logger.error(f"Failed to initialize {self.name}: {e}")
+            # Clean up any partially initialized resources
+            await self.cleanup()
+            raise RuntimeError(f"Agent initialization failed: {str(e)}") from e
     
     async def cleanup(self) -> None:
-        """Release resources held by the agent."""
+        """
+        Release resources held by the agent.
+        
+        This method ensures all resources are properly cleaned up, even if there are errors.
+        """
         logger.info(f"{self.name} cleaning up resources")
         
-        # Close database connections
-        await self.history_manager.close()
+        try:
+            # Close database connections
+            await self.history_manager.close()
+            
+            # Clean up any temporary files or resources
+            if hasattr(self, 'script_executor'):
+                await self.script_executor.cleanup()
+            
+            # Clean up workflow graph
+            if hasattr(self, 'graph'):
+                self.graph.clear()
+            
+            logger.info(f"{self.name} cleanup completed successfully")
+        except Exception as e:
+            logger.error(f"Error during {self.name} cleanup: {e}")
+            # Don't re-raise the exception as this is cleanup
 
 class WorkflowAgentFactory:
     """Factory class for creating workflow agents."""
