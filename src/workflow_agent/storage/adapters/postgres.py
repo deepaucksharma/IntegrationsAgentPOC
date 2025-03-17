@@ -8,10 +8,11 @@ import asyncpg
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from ..models import ExecutionRecord
+from .base import BaseAdapter
 
 logger = logging.getLogger(__name__)
 
-class PostgreSQLAdapter:
+class PostgreSQLAdapter(BaseAdapter):
     """PostgreSQL implementation for history storage."""
     
     def __init__(self, connection_string: str):
@@ -21,6 +22,9 @@ class PostgreSQLAdapter:
         Args:
             connection_string: PostgreSQL connection string
         """
+        if not self._validate_connection_string(connection_string):
+            raise ValueError("Invalid connection string")
+            
         self.connection_string = connection_string
         
         # For asyncpg (async)
@@ -35,7 +39,7 @@ class PostgreSQLAdapter:
         self.Base = Base
         self.ExecutionRecord = ExecutionRecord
     
-    async def initialize(self):
+    async def initialize(self) -> None:
         """Initialize the database schema."""
         # Create tables using SQLAlchemy
         self.Base.metadata.create_all(bind=self.engine)
@@ -62,7 +66,9 @@ class PostgreSQLAdapter:
                 password=password,
                 database=db,
                 host=host,
-                port=port
+                port=port,
+                min_size=1,
+                max_size=10
             )
             
             logger.info("Initialized PostgreSQL connection pool")
@@ -85,26 +91,7 @@ class PostgreSQLAdapter:
         transaction_id: str = None,
         user_id: str = None
     ) -> int:
-        """
-        Save an execution record to PostgreSQL.
-        
-        Args:
-            target_name: Name of the target system
-            action: Action performed
-            success: Whether the execution was successful
-            execution_time: Time taken for execution in milliseconds
-            error_message: Error message if execution failed
-            system_context: System context information
-            script: Script that was executed
-            output: Output from script execution
-            parameters: Parameters used for execution
-            transaction_id: ID for tracking related operations
-            user_id: ID of user who initiated the execution
-            
-        Returns:
-            ID of the saved record
-        """
-        # Use asyncpg if pool is available, otherwise fall back to SQLAlchemy
+        """Save an execution record to PostgreSQL."""
         if self.pool:
             try:
                 async with self.pool.acquire() as conn:
@@ -210,9 +197,284 @@ class PostgreSQLAdapter:
         finally:
             session.close()
     
-    # Additional methods would be implemented here, similar to SQLiteAdapter
+    async def get_execution_history(
+        self,
+        target: str,
+        action: str,
+        limit: int = 10,
+        user_id: str = None
+    ) -> List[Dict[str, Any]]:
+        """Get execution history from PostgreSQL."""
+        if self.pool:
+            try:
+                async with self.pool.acquire() as conn:
+                    query = '''
+                        SELECT * FROM execution_records
+                        WHERE target_name = $1 AND action = $2
+                    '''
+                    params = [target, action]
+                    
+                    if user_id:
+                        query += " AND user_id = $3"
+                        params.append(user_id)
+                        
+                    query += " ORDER BY timestamp DESC LIMIT $" + str(len(params) + 1)
+                    params.append(limit)
+                    
+                    rows = await conn.fetch(query, *params)
+                    
+                    history = []
+                    for row in rows:
+                        history.append({
+                            "id": row['id'],
+                            "target_name": row['target_name'],
+                            "action": row['action'],
+                            "success": row['success'],
+                            "execution_time": row['execution_time'],
+                            "error_message": row['error_message'],
+                            "timestamp": row['timestamp'],
+                            "script": row['script'],
+                            "output": json.loads(row['output']),
+                            "parameters": json.loads(row['parameters']),
+                            "transaction_id": row['transaction_id'],
+                            "user_id": row['user_id']
+                        })
+                    return history
+            except Exception as e:
+                logger.error(f"Error retrieving execution history: {e}")
+                return []
+        else:
+            # Fall back to SQLAlchemy
+            session = self.SessionLocal()
+            try:
+                query = self.ExecutionRecord.query.filter_by(
+                    target_name=target,
+                    action=action
+                )
+                if user_id:
+                    query = query.filter_by(user_id=user_id)
+                records = query.order_by(self.ExecutionRecord.timestamp.desc()).limit(limit).all()
+                
+                return [{
+                    "id": record.id,
+                    "target_name": record.target_name,
+                    "action": record.action,
+                    "success": record.success,
+                    "execution_time": record.execution_time,
+                    "error_message": record.error_message,
+                    "timestamp": record.timestamp,
+                    "script": record.script,
+                    "output": json.loads(record.output),
+                    "parameters": json.loads(record.parameters),
+                    "transaction_id": record.transaction_id,
+                    "user_id": record.user_id
+                } for record in records]
+            except Exception as e:
+                logger.error(f"Error retrieving execution history: {e}")
+                return []
+            finally:
+                session.close()
     
-    async def close(self):
+    async def get_execution_statistics(
+        self,
+        target: str,
+        action: str,
+        user_id: str = None
+    ) -> Dict[str, Any]:
+        """Get execution statistics for a specific target and action."""
+        if self.pool:
+            try:
+                async with self.pool.acquire() as conn:
+                    query = '''
+                        SELECT 
+                            COUNT(*) as total_executions,
+                            SUM(CASE WHEN success = true THEN 1 ELSE 0 END) as successful_executions,
+                            SUM(CASE WHEN success = false THEN 1 ELSE 0 END) as failed_executions,
+                            AVG(execution_time) as avg_execution_time,
+                            MAX(CASE WHEN success = true THEN timestamp ELSE NULL END) as last_success_time,
+                            MAX(CASE WHEN success = false THEN timestamp ELSE NULL END) as last_failure_time,
+                            MAX(timestamp) as last_execution_time
+                        FROM execution_records
+                        WHERE target_name = $1 AND action = $2
+                    '''
+                    params = [target, action]
+                    
+                    if user_id:
+                        query += " AND user_id = $3"
+                        params.append(user_id)
+                    
+                    row = await conn.fetchrow(query, *params)
+                    
+                    if not row or row['total_executions'] == 0:
+                        return {
+                            "total_executions": 0,
+                            "successful_executions": 0,
+                            "failed_executions": 0,
+                            "avg_execution_time": 0,
+                            "success_rate": 0,
+                            "last_execution_time": None,
+                            "last_success_time": None,
+                            "last_failure_time": None
+                        }
+                    
+                    return {
+                        "total_executions": row['total_executions'],
+                        "successful_executions": row['successful_executions'],
+                        "failed_executions": row['failed_executions'],
+                        "avg_execution_time": round(float(row['avg_execution_time']), 2) if row['avg_execution_time'] else 0,
+                        "success_rate": round((row['successful_executions'] / row['total_executions']) * 100, 2),
+                        "last_execution_time": row['last_execution_time'],
+                        "last_success_time": row['last_success_time'],
+                        "last_failure_time": row['last_failure_time']
+                    }
+            except Exception as e:
+                logger.error(f"Error retrieving execution statistics: {e}")
+                return {
+                    "total_executions": 0,
+                    "successful_executions": 0,
+                    "failed_executions": 0,
+                    "avg_execution_time": 0,
+                    "success_rate": 0,
+                    "last_execution_time": None,
+                    "last_success_time": None,
+                    "last_failure_time": None
+                }
+        else:
+            # Fall back to SQLAlchemy
+            session = self.SessionLocal()
+            try:
+                query = self.ExecutionRecord.query.filter_by(
+                    target_name=target,
+                    action=action
+                )
+                if user_id:
+                    query = query.filter_by(user_id=user_id)
+                
+                records = query.all()
+                if not records:
+                    return {
+                        "total_executions": 0,
+                        "successful_executions": 0,
+                        "failed_executions": 0,
+                        "avg_execution_time": 0,
+                        "success_rate": 0,
+                        "last_execution_time": None,
+                        "last_success_time": None,
+                        "last_failure_time": None
+                    }
+                
+                total = len(records)
+                successful = sum(1 for r in records if r.success)
+                failed = total - successful
+                avg_time = sum(r.execution_time for r in records) / total if total > 0 else 0
+                
+                last_success = max((r.timestamp for r in records if r.success), default=None)
+                last_failure = max((r.timestamp for r in records if not r.success), default=None)
+                last_execution = max(r.timestamp for r in records)
+                
+                return {
+                    "total_executions": total,
+                    "successful_executions": successful,
+                    "failed_executions": failed,
+                    "avg_execution_time": round(avg_time, 2),
+                    "success_rate": round((successful / total) * 100, 2),
+                    "last_execution_time": last_execution,
+                    "last_success_time": last_success,
+                    "last_failure_time": last_failure
+                }
+            except Exception as e:
+                logger.error(f"Error retrieving execution statistics: {e}")
+                return {
+                    "total_executions": 0,
+                    "successful_executions": 0,
+                    "failed_executions": 0,
+                    "avg_execution_time": 0,
+                    "success_rate": 0,
+                    "last_execution_time": None,
+                    "last_success_time": None,
+                    "last_failure_time": None
+                }
+            finally:
+                session.close()
+    
+    async def clear_history(
+        self,
+        target: str = None,
+        action: str = None,
+        days: int = None,
+        user_id: str = None
+    ) -> int:
+        """Clear execution history records."""
+        if self.pool:
+            try:
+                async with self.pool.acquire() as conn:
+                    # Build the WHERE clause
+                    where_clauses = []
+                    params = []
+                    param_count = 1
+                    
+                    if target:
+                        where_clauses.append(f"target_name = ${param_count}")
+                        params.append(target)
+                        param_count += 1
+                    
+                    if action:
+                        where_clauses.append(f"action = ${param_count}")
+                        params.append(action)
+                        param_count += 1
+                    
+                    if user_id:
+                        where_clauses.append(f"user_id = ${param_count}")
+                        params.append(user_id)
+                        param_count += 1
+                    
+                    if days:
+                        where_clauses.append(f"timestamp < NOW() - INTERVAL '${param_count} days'")
+                        params.append(days)
+                        param_count += 1
+                    
+                    # Construct the query
+                    query = "DELETE FROM execution_records"
+                    if where_clauses:
+                        query += " WHERE " + " AND ".join(where_clauses)
+                    
+                    # Execute the query
+                    result = await conn.execute(query, *params)
+                    count = int(result.split()[-1])
+                    logger.info(f"Cleared {count} execution records")
+                    return count
+            except Exception as e:
+                logger.error(f"Error clearing execution history: {e}")
+                return 0
+        else:
+            # Fall back to SQLAlchemy
+            session = self.SessionLocal()
+            try:
+                query = self.ExecutionRecord.query
+                
+                if target:
+                    query = query.filter_by(target_name=target)
+                if action:
+                    query = query.filter_by(action=action)
+                if user_id:
+                    query = query.filter_by(user_id=user_id)
+                if days:
+                    query = query.filter(
+                        self.ExecutionRecord.timestamp < datetime.datetime.utcnow() - datetime.timedelta(days=days)
+                    )
+                
+                count = query.delete()
+                session.commit()
+                logger.info(f"Cleared {count} execution records")
+                return count
+            except Exception as e:
+                logger.error(f"Error clearing execution history: {e}")
+                session.rollback()
+                return 0
+            finally:
+                session.close()
+    
+    async def close(self) -> None:
         """Close database connections."""
         if self.pool:
             await self.pool.close()

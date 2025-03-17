@@ -2,9 +2,11 @@
 import os
 import logging
 from typing import Optional, Union
-from .sqlite import SQLiteAdapter
+from .base import BaseAdapter
 from .postgres import PostgreSQLAdapter
 from .mysql import MySQLAdapter
+from .sqlite import SQLiteAdapter
+from .factory import create_adapter
 
 logger = logging.getLogger(__name__)
 
@@ -52,8 +54,9 @@ def get_adapter(connection_string: Optional[str] = None):
         return SQLiteAdapter(db_path)
 
 __all__ = [
-    "get_adapter",
-    "SQLiteAdapter",
-    "PostgreSQLAdapter",
-    "MySQLAdapter"
+    'BaseAdapter',
+    'PostgreSQLAdapter',
+    'MySQLAdapter',
+    'SQLiteAdapter',
+    'create_adapter'
 ]
