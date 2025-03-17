@@ -9,10 +9,12 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from ..models import ExecutionRecord
 from .base import BaseAdapter
+from .base_sql import BaseSQLAdapter
+from ...error.exceptions import DatabaseError
 
 logger = logging.getLogger(__name__)
 
-class PostgreSQLAdapter(BaseAdapter):
+class PostgreSQLAdapter(BaseSQLAdapter):
     """PostgreSQL implementation for history storage."""
     
     def __init__(self, connection_string: str):
@@ -45,6 +47,10 @@ class PostgreSQLAdapter(BaseAdapter):
         self.Base.metadata.create_all(bind=self.engine)
         
         # Initialize connection pool
+        await self._initialize_pool()
+    
+    async def _initialize_pool(self) -> None:
+        """Initialize the PostgreSQL connection pool."""
         try:
             # Convert SQLAlchemy connection string to asyncpg format
             conn_str = self.connection_string.replace('postgresql://', '')
@@ -74,8 +80,7 @@ class PostgreSQLAdapter(BaseAdapter):
             logger.info("Initialized PostgreSQL connection pool")
         except Exception as e:
             logger.error(f"Failed to initialize PostgreSQL pool: {e}")
-            # Fall back to synchronous operations
-            self.pool = None
+            raise DatabaseError(f"Failed to initialize PostgreSQL pool: {str(e)}")
     
     async def save_execution(
         self,
@@ -130,6 +135,47 @@ class PostgreSQLAdapter(BaseAdapter):
                 target_name, action, success, execution_time, error_message,
                 system_context, script, output, parameters, transaction_id, user_id
             )
+    
+    async def _save_execution_async(
+        self,
+        target_name: str,
+        action: str,
+        success: bool,
+        execution_time: int,
+        error_message: Optional[str],
+        system_context: dict,
+        script: str,
+        output: dict = None,
+        parameters: dict = None,
+        transaction_id: str = None,
+        user_id: str = None
+    ) -> int:
+        """Save execution record using asyncpg."""
+        async with self.pool.acquire() as conn:
+            result = await conn.fetchrow('''
+                INSERT INTO execution_records
+                (target_name, action, success, execution_time, error_message, 
+                 system_context, script, output, parameters, transaction_id, user_id, timestamp)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                RETURNING id
+            ''', 
+            target_name, 
+            action, 
+            success, 
+            execution_time, 
+            error_message, 
+            json.dumps(system_context), 
+            script, 
+            json.dumps(output) if output else "{}", 
+            json.dumps(parameters) if parameters else "{}",
+            transaction_id,
+            user_id,
+            datetime.datetime.utcnow()
+            )
+            
+            record_id = result['id']
+            logger.info(f"Saved execution record with ID {record_id}")
+            return record_id
     
     async def _save_execution_sqlalchemy(
         self,
@@ -274,6 +320,69 @@ class PostgreSQLAdapter(BaseAdapter):
                 return []
             finally:
                 session.close()
+    
+    async def _get_execution_history_async(
+        self,
+        target: str = None,
+        action: str = None,
+        limit: int = 100,
+        user_id: str = None,
+        start_time: datetime = None,
+        end_time: datetime = None
+    ) -> List[Dict[str, Any]]:
+        """Get execution history using asyncpg."""
+        async with self.pool.acquire() as conn:
+            query = '''
+                SELECT * FROM execution_records
+                WHERE 1=1
+            '''
+            params = []
+            param_count = 1
+            
+            if target:
+                query += f" AND target_name = ${param_count}"
+                params.append(target)
+                param_count += 1
+            
+            if action:
+                query += f" AND action = ${param_count}"
+                params.append(action)
+                param_count += 1
+            
+            if user_id:
+                query += f" AND user_id = ${param_count}"
+                params.append(user_id)
+                param_count += 1
+            
+            if start_time:
+                query += f" AND timestamp >= ${param_count}"
+                params.append(start_time)
+                param_count += 1
+            
+            if end_time:
+                query += f" AND timestamp <= ${param_count}"
+                params.append(end_time)
+                param_count += 1
+            
+            query += f" ORDER BY timestamp DESC LIMIT ${param_count}"
+            params.append(limit)
+            
+            rows = await conn.fetch(query, *params)
+            
+            return [{
+                "id": row['id'],
+                "target_name": row['target_name'],
+                "action": row['action'],
+                "success": row['success'],
+                "execution_time": row['execution_time'],
+                "error_message": row['error_message'],
+                "timestamp": row['timestamp'],
+                "script": row['script'],
+                "output": json.loads(row['output']),
+                "parameters": json.loads(row['parameters']),
+                "transaction_id": row['transaction_id'],
+                "user_id": row['user_id']
+            } for row in rows]
     
     async def get_execution_statistics(
         self,
@@ -474,8 +583,54 @@ class PostgreSQLAdapter(BaseAdapter):
             finally:
                 session.close()
     
+    async def _clear_history_async(
+        self,
+        target: str = None,
+        action: str = None,
+        user_id: str = None,
+        before_time: datetime = None
+    ) -> int:
+        """Clear history using asyncpg."""
+        async with self.pool.acquire() as conn:
+            query = '''
+                DELETE FROM execution_records
+                WHERE 1=1
+            '''
+            params = []
+            param_count = 1
+            
+            if target:
+                query += f" AND target_name = ${param_count}"
+                params.append(target)
+                param_count += 1
+            
+            if action:
+                query += f" AND action = ${param_count}"
+                params.append(action)
+                param_count += 1
+            
+            if user_id:
+                query += f" AND user_id = ${param_count}"
+                params.append(user_id)
+                param_count += 1
+            
+            if before_time:
+                query += f" AND timestamp < ${param_count}"
+                params.append(before_time)
+            
+            result = await conn.execute(query, *params)
+            count = int(result.split()[-1])
+            logger.info(f"Cleared {count} history records")
+            return count
+    
     async def close(self) -> None:
         """Close database connections."""
+        if self.pool:
+            await self.pool.close()
+            logger.info("Closed PostgreSQL connection pool")
+    
+    async def _close_pool(self) -> None:
+        """Close the PostgreSQL connection pool."""
         if self.pool:
             await self.pool.close()
             logger.info("Closed PostgreSQL connection pool")

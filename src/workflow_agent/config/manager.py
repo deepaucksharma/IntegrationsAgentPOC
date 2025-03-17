@@ -5,6 +5,9 @@ from pathlib import Path
 import yaml
 from dataclasses import dataclass
 from .schemas import ParameterSpec
+from functools import lru_cache
+from .configuration import ensure_workflow_config, WorkflowConfiguration
+from ..error.exceptions import ConfigurationError
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +28,60 @@ class WorkflowConfig:
     log_file: str
     history_enabled: bool
     history_retention_days: int
+
+class ConfigurationManager:
+    """Manages configuration with caching support."""
+    
+    def __init__(self, config_dir: Optional[Path] = None):
+        """Initialize the configuration manager."""
+        self.config_dir = config_dir or Path("config")
+        self.config_dir.mkdir(parents=True, exist_ok=True)
+    
+    @lru_cache(maxsize=1)
+    def get_workflow_config(self, config: Optional[Dict[str, Any]] = None) -> WorkflowConfiguration:
+        """Get workflow configuration with caching."""
+        try:
+            return ensure_workflow_config(config)
+        except Exception as e:
+            logger.error(f"Failed to load workflow config: {e}")
+            raise ConfigurationError(f"Invalid workflow configuration: {str(e)}")
+    
+    @lru_cache(maxsize=100)
+    def get_template(self, template_name: str) -> str:
+        """Get template content with caching."""
+        template_path = self.config_dir / "templates" / template_name
+        try:
+            if not template_path.exists():
+                raise ConfigurationError(f"Template not found: {template_name}")
+            return template_path.read_text()
+        except Exception as e:
+            logger.error(f"Failed to load template {template_name}: {e}")
+            raise ConfigurationError(f"Failed to load template {template_name}: {str(e)}")
+    
+    @lru_cache(maxsize=10)
+    def get_schema(self, schema_name: str) -> Dict[str, Any]:
+        """Get schema with caching."""
+        schema_path = self.config_dir / "schemas" / f"{schema_name}.yaml"
+        try:
+            if not schema_path.exists():
+                raise ConfigurationError(f"Schema not found: {schema_name}")
+            with open(schema_path) as f:
+                return yaml.safe_load(f)
+        except Exception as e:
+            logger.error(f"Failed to load schema {schema_name}: {e}")
+            raise ConfigurationError(f"Failed to load schema {schema_name}: {str(e)}")
+    
+    def clear_cache(self) -> None:
+        """Clear all cached configurations."""
+        self.get_workflow_config.cache_clear()
+        self.get_template.cache_clear()
+        self.get_schema.cache_clear()
+        logger.info("Cleared configuration cache")
+    
+    def reload_config(self) -> None:
+        """Reload all configurations."""
+        self.clear_cache()
+        logger.info("Reloaded all configurations")
 
 class ConfigManager:
     """Centralized configuration management."""

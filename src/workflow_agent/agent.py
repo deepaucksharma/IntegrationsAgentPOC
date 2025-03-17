@@ -12,45 +12,76 @@ from .scripting import ScriptGenerator, ScriptValidator
 from .execution import ScriptExecutor
 from .verification import Verifier
 from .rollback import RecoveryManager
+from .error.exceptions import WorkflowError, ValidationError, ExecutionError
+from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
+
+@dataclass
+class WorkflowAgentConfig:
+    """Configuration for WorkflowAgent components."""
+    history_manager: Optional[HistoryManager] = None
+    script_generator: Optional[ScriptGenerator] = None
+    script_validator: Optional[ScriptValidator] = None
+    script_executor: Optional[ScriptExecutor] = None
+    verifier: Optional[Verifier] = None
+    recovery_manager: Optional[RecoveryManager] = None
+    max_concurrent_tasks: int = 5
+    use_isolation: bool = True
+    isolation_method: str = "sandbox"
+    execution_timeout: int = 300
+    skip_verification: bool = False
+    use_llm_optimization: bool = True
+    rule_based_optimization: bool = True
+    use_static_analysis: bool = True
 
 class WorkflowAgent(AbstractWorkflowAgent):
     """An agent that orchestrates multi-step workflows with validation and rollback."""
     
-    def __init__(self):
-        """Initialize the workflow agent."""
+    def __init__(self, config: Optional[WorkflowAgentConfig] = None):
+        """Initialize the workflow agent with dependency injection."""
         super().__init__("WorkflowAgent", "An agent that orchestrates multi-step workflows with validation and rollback")
         
-        # Create components
-        self.history_manager = HistoryManager()
-        self.script_generator = ScriptGenerator(self.history_manager)
-        self.script_validator = ScriptValidator()
-        self.script_executor = ScriptExecutor(self.history_manager)
-        self.verifier = Verifier()
-        self.recovery_manager = RecoveryManager(self.history_manager)
+        self.config = config or WorkflowAgentConfig()
+        
+        # Initialize components with dependency injection
+        self.history_manager = self.config.history_manager or HistoryManager()
+        self.script_generator = self.config.script_generator or ScriptGenerator(self.history_manager)
+        self.script_validator = self.config.script_validator or ScriptValidator()
+        self.script_executor = self.config.script_executor or ScriptExecutor(self.history_manager)
+        self.verifier = self.config.verifier or Verifier()
+        self.recovery_manager = self.config.recovery_manager or RecoveryManager(self.history_manager)
         
         # Set up workflow graph
-        self.graph = WorkflowGraph()
+        self.graph = self._create_workflow_graph()
+        
+        # Create workflow executor with concurrency control
+        self.workflow_executor = WorkflowExecutor(
+            self.graph,
+            max_concurrent_tasks=self.config.max_concurrent_tasks
+        )
+    
+    def _create_workflow_graph(self) -> WorkflowGraph:
+        """Create and configure the workflow graph."""
+        graph = WorkflowGraph()
         
         # Add workflow nodes
-        self.graph.add_node("validate_parameters", self._validate_parameters)
-        self.graph.add_node("generate_script", self._generate_script)
-        self.graph.add_node("validate_script", self._validate_script)
-        self.graph.add_node("run_script", self._run_script)
-        self.graph.add_node("verify_result", self._verify_result)
-        self.graph.add_node("rollback_changes", self._rollback_changes)
+        graph.add_node("validate_parameters", self._validate_parameters)
+        graph.add_node("generate_script", self._generate_script)
+        graph.add_node("validate_script", self._validate_script)
+        graph.add_node("run_script", self._run_script)
+        graph.add_node("verify_result", self._verify_result)
+        graph.add_node("rollback_changes", self._rollback_changes)
         
         # Set up transitions
-        self.graph.add_transition("validate_parameters", "generate_script")
-        self.graph.add_transition("generate_script", "validate_script")
-        self.graph.add_transition("validate_script", "run_script")
-        self.graph.add_transition("run_script", "verify_result")
-        self.graph.add_transition("verify_result", None)  # End node
-        self.graph.add_transition("rollback_changes", None)  # End node
+        graph.add_transition("validate_parameters", "generate_script")
+        graph.add_transition("generate_script", "validate_script")
+        graph.add_transition("validate_script", "run_script")
+        graph.add_transition("run_script", "verify_result")
+        graph.add_transition("verify_result", None)  # End node
+        graph.add_transition("rollback_changes", None)  # End node
         
-        # Create workflow executor
-        self.workflow_executor = WorkflowExecutor(self.graph)
+        return graph
     
     def get_config_schema(self) -> Dict[str, Any]:
         """
@@ -102,27 +133,14 @@ class WorkflowAgent(AbstractWorkflowAgent):
         ]
     
     async def invoke(self, input_state: AgentState, config: Optional[Dict[str, Any]] = None) -> AgentResult:
-        """
-        Invoke the workflow agent.
-        
-        Args:
-            input_state: Initial state dictionary
-            config: Optional configuration
-            
-        Returns:
-            Updated state dictionary after workflow execution
-            
-        Raises:
-            ValueError: If input state is invalid
-            RuntimeError: If workflow execution fails
-        """
+        """Invoke the workflow agent with improved error handling and validation."""
         try:
             workflow_config = ensure_workflow_config(config)
             state_dict = dict(input_state)
             
             logger.info(f"Invoking workflow agent for {state_dict.get('action', 'unknown')} on {state_dict.get('target_name', 'unknown')}")
             
-            # Generate a transaction ID if not provided
+            # Generate transaction ID if not provided
             if "transaction_id" not in state_dict:
                 state_dict["transaction_id"] = str(uuid.uuid4())
                 logger.info(f"Generated transaction ID: {state_dict['transaction_id']}")
@@ -139,21 +157,14 @@ class WorkflowAgent(AbstractWorkflowAgent):
                 integration_type = state_dict["integration_type"]
                 valid_types = ["infra_agent", "aws", "azure", "gcp", "apm", "browser", "custom"]
                 if integration_type not in valid_types:
-                    error_msg = f"Invalid integration_type: {integration_type}. Valid types are: {', '.join(valid_types)}"
-                    logger.error(error_msg)
-                    return {"error": error_msg, "messages": input_state.get("messages", [])}
+                    raise ValidationError(f"Invalid integration_type: {integration_type}. Valid types are: {', '.join(valid_types)}")
             
             # Handle special commands
             special_command = state_dict.get("special_command")
             if special_command == "retrieve_docs":
-                logger.info(f"Handling special command: retrieve_docs for {state_dict.get('target_name')}")
-                docs = f"# Documentation for {state_dict.get('action', 'default')} on {state_dict.get('target_name', 'default')}\n"
-                docs += "\nThis is a placeholder for more comprehensive documentation that could be generated dynamically."
-                return {"docs": docs, "messages": input_state.get("messages", [])}
+                return await self._handle_retrieve_docs(state_dict)
             elif special_command == "dry_run":
-                logger.info(f"Handling special command: dry_run for {state_dict.get('target_name')}")
-                partial_result = await self._partial_workflow(state_dict, config)
-                return {**partial_result, "messages": input_state.get("messages", [])}
+                return await self._handle_dry_run(state_dict, config)
             
             # Auto-prune history if configured
             if workflow_config.prune_history_days:
@@ -161,80 +172,76 @@ class WorkflowAgent(AbstractWorkflowAgent):
             
             # Execute full workflow
             logger.info("Executing full workflow")
-            
             result = await self.workflow_executor.execute_workflow(state_dict, config)
             
-            agent_result = {**result, "messages": input_state.get("messages", [])}
-            return agent_result
+            return {**result, "messages": input_state.get("messages", [])}
             
-        except ValueError as e:
-            logger.error(f"Invalid input state or configuration: {e}")
+        except ValidationError as e:
+            logger.error(f"Validation error: {e}")
+            return {"error": str(e), "messages": input_state.get("messages", [])}
+        except ExecutionError as e:
+            logger.error(f"Execution error: {e}")
             return {"error": str(e), "messages": input_state.get("messages", [])}
         except Exception as e:
             logger.exception("Unexpected error during workflow execution")
             return {"error": f"Workflow execution failed: {str(e)}", "messages": input_state.get("messages", [])}
         finally:
-            # Ensure cleanup happens even if there's an error
             await self.cleanup()
     
-    async def _partial_workflow(
-        self,
-        state_dict: Dict[str, Any],
-        config: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
-        """
-        Execute a partial workflow for dry run.
-        
-        Args:
-            state_dict: Initial state dictionary
-            config: Optional configuration
-            
-        Returns:
-            Updated state dictionary after partial workflow execution
-        """
+    async def _handle_retrieve_docs(self, state_dict: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle documentation retrieval command."""
+        logger.info(f"Handling special command: retrieve_docs for {state_dict.get('target_name')}")
+        docs = f"# Documentation for {state_dict.get('action', 'default')} on {state_dict.get('target_name', 'default')}\n"
+        docs += "\nThis is a placeholder for more comprehensive documentation that could be generated dynamically."
+        return {"docs": docs, "messages": state_dict.get("messages", [])}
+    
+    async def _handle_dry_run(self, state_dict: Dict[str, Any], config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Handle dry run command."""
+        logger.info(f"Handling special command: dry_run for {state_dict.get('target_name')}")
+        partial_result = await self._partial_workflow(state_dict, config)
+        return {**partial_result, "messages": state_dict.get("messages", [])}
+    
+    async def _partial_workflow(self, state_dict: Dict[str, Any], config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Execute a partial workflow for dry run with improved error handling."""
         logger.info("Executing partial workflow for dry run")
         state = WorkflowState(**state_dict)
         
-        # Validate parameters
         try:
+            # Validate parameters
             result = await self._validate_parameters(state, config)
             for key, value in result.items():
                 setattr(state, key, value)
-        except Exception as e:
-            logger.exception(f"Parameter validation failed: {e}")
-            state.error = f"Parameter validation failed: {str(e)}"
-            return state.dict()
-        
-        if state.error:
-            logger.error(f"Parameter validation failed: {state.error}")
-            return state.dict()
-        
-        # Generate script
-        try:
+            
+            if state.error:
+                raise ValidationError(f"Parameter validation failed: {state.error}")
+            
+            # Generate script
             result = await self._generate_script(state, config)
             for key, value in result.items():
                 setattr(state, key, value)
-        except Exception as e:
-            logger.exception(f"Script generation failed: {e}")
-            state.error = f"Script generation failed: {str(e)}"
-            return state.dict()
-        
-        if state.error:
-            logger.error(f"Script generation failed: {state.error}")
-            return state.dict()
-        
-        # Validate script
-        try:
+            
+            if state.error:
+                raise ExecutionError(f"Script generation failed: {state.error}")
+            
+            # Validate script
             result = await self._validate_script(state, config)
             for key, value in result.items():
                 setattr(state, key, value)
-        except Exception as e:
-            logger.exception(f"Script validation failed: {e}")
-            state.error = f"Script validation failed: {str(e)}"
+            
+            if state.error:
+                raise ValidationError(f"Script validation failed: {state.error}")
+            
+            logger.info("Dry run workflow completed")
             return state.dict()
-        
-        logger.info("Dry run workflow completed")
-        return state.dict()
+            
+        except (ValidationError, ExecutionError) as e:
+            logger.error(f"Dry run failed: {e}")
+            state.error = str(e)
+            return state.dict()
+        except Exception as e:
+            logger.exception("Unexpected error during dry run")
+            state.error = f"Dry run failed: {str(e)}"
+            return state.dict()
     
     async def _validate_parameters(self, state: WorkflowState, config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Validate workflow parameters."""
@@ -337,29 +344,13 @@ class WorkflowAgent(AbstractWorkflowAgent):
             raise RuntimeError(f"Agent initialization failed: {str(e)}") from e
     
     async def cleanup(self) -> None:
-        """
-        Release resources held by the agent.
-        
-        This method ensures all resources are properly cleaned up, even if there are errors.
-        """
-        logger.info(f"{self.name} cleaning up resources")
-        
+        """Clean up resources."""
         try:
-            # Close database connections
             await self.history_manager.close()
-            
-            # Clean up any temporary files or resources
-            if hasattr(self, 'script_executor'):
-                await self.script_executor.cleanup()
-            
-            # Clean up workflow graph
-            if hasattr(self, 'graph'):
-                self.graph.clear()
-            
-            logger.info(f"{self.name} cleanup completed successfully")
+            await self.script_executor.cleanup()
+            await self.recovery_manager.cleanup()
         except Exception as e:
-            logger.error(f"Error during {self.name} cleanup: {e}")
-            # Don't re-raise the exception as this is cleanup
+            logger.error(f"Error during cleanup: {e}")
 
 class WorkflowAgentFactory:
     """Factory class for creating workflow agents."""
