@@ -1,6 +1,6 @@
 configurable:
   user_id: "test_user"
-  template_dir: "src/workflow_agent/integrations/common_templates"
+  template_dir: "./src/workflow_agent/integrations/common_templates"
   custom_template_dir: null
   use_isolation: false
   isolation_method: "direct"
@@ -8,7 +8,7 @@ configurable:
   skip_verification: false
   rule_based_optimization: true
   use_static_analysis: true
-  db_connection_string: "workflow_history.db"
+  db_connection_string: "./workflow_history.db"
   prune_history_days: 90
   plugin_dirs:
     - "./plugins"

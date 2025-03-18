@@ -10,3 +10,9 @@ logging.basicConfig(
     level=os.environ.get("LOG_LEVEL", "INFO"),
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
+
+"""
+Workflow Agent Package
+"""
+
+__version__ = "0.1.0"

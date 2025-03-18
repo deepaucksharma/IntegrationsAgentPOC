@@ -1,11 +1,29 @@
-#!/usr/bin/env bash
+#!/bin/bash
 set -e
 
-{% from "macros/common.sh.j2" import log_message %}
-{{ log_message("INFO", "Starting install for " + template_data.get("name", "unknown")) }}
+# Common installation template
+{% include 'macros/common.sh.j2' %}
 
-{% for cmd in template_data.get('install', {}).get('commands', []) %}
-{{ cmd }}
-{% endfor %}
+echo "Starting installation of {{ target_name }}..."
 
-echo "Install complete."
+# Platform-specific setup
+{% if system_context.platform.system == 'win32' %}
+# Windows-specific commands
+powershell -Command "Write-Host 'Running on Windows'"
+{% else %}
+# Linux/Unix commands
+echo "Running on Unix-like system"
+{% endif %}
+
+# Installation steps
+{% if template_data.selected_method %}
+{{ template_data.selected_method.steps | join('\n') }}
+{% else %}
+echo "No installation method selected. Using default approach."
+{% endif %}
+
+# Verify installation
+echo "Verifying installation..."
+{% include 'verify/base.sh.j2' %}
+
+echo "Installation of {{ target_name }} completed."

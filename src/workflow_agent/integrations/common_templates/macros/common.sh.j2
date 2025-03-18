@@ -1,3 +1,45 @@
+# Common utility functions and macros
+
+{% macro log_message(level, message) %}
+timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+echo "[${timestamp}] [{{ level }}] {{ message }}"
+{% endmacro %}
+
+{% macro check_prerequisites() %}
+# Check if required tools are available
+{% for tool in template_data.required_tools %}
+if ! command -v {{ tool }} &> /dev/null; then
+    {{ log_message('ERROR', tool + ' is required but not found') }}
+    exit 1
+fi
+{% endfor %}
+{% endmacro %}
+
+{% macro handle_error(message) %}
+{{ log_message('ERROR', message) }}
+{% if system_context.error_handling.continue_on_error %}
+return 1
+{% else %}
+exit 1
+{% endif %}
+{% endmacro %}
+
+{% macro backup_file(file_path) %}
+if [ -f "{{ file_path }}" ]; then
+    backup_path="{{ file_path }}.bak.$(date +%Y%m%d_%H%M%S)"
+    cp "{{ file_path }}" "${backup_path}"
+    {{ log_message('INFO', 'Created backup: ' + backup_path) }}
+fi
+{% endmacro %}
+
+{% macro cleanup() %}
+# Cleanup temporary files
+if [ -d "${TEMP_DIR}" ]; then
+    rm -rf "${TEMP_DIR}"
+    {{ log_message('INFO', 'Cleaned up temporary directory') }}
+fi
+{% endmacro %}
+
 {# Common logging macro #}
 {% macro log_message(level, message) -%}
 echo "[`date +'%Y-%m-%d %H:%M:%S'`] [{{ level }}] {{ message }}"
