@@ -1,6 +1,6 @@
 configurable:
   user_id: "test_user"
-  template_dir: "./integrations/common_templates"
+  template_dir: "src/workflow_agent/integrations/common_templates"
   custom_template_dir: null
   use_isolation: false
   isolation_method: "direct"

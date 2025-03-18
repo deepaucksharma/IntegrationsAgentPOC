@@ -1,6 +1,6 @@
 """
 Rollback components for workflow agent.
 """
-from .recovery import RollbackManager
+from .recovery import RecoveryManager
 
-__all__ = ["RollbackManager"]
+__all__ = ["RecoveryManager"]

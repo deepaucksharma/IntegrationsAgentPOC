@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
-class HistoryManager:
+class ExecutionHistoryManager:
     def __init__(self, db_path: Optional[str] = None):
         self.db_path = db_path or "workflow_history.db"
         self.connection = None
