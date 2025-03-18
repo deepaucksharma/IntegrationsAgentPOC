@@ -247,5 +247,44 @@
     ],
     "successes": 0,
     "improvements": []
+  },
+  "infra_agent_infra_agent_install": {
+    "failures": [
+      {
+        "error": "Verification failed due to error in stderr: set-variable : missing an argument for parameter 'exclude'. specify a parameter of type 'system.string[]' and try \r\nagain.\r\nat c:\\users\\hi\\appdata\\local\\temp\\workflow-33yil1x6\\script-019371eb-6c8f-4bb2-b0c3-96e325876971.ps1:2 char:5\r\n+ set -e\r\n+     ~~\r\n    + categoryinfo          : invalidargument: (:) [set-variable], parameterbindingexception\r\n    + fullyqualifiederrorid : missingargument,microsoft.powershell.commands.setvariablecommand\r\n \r\n",
+        "root_cause": "unknown_error: Verification failed due to error in stderr: set-variable : missing an argument for parameter 'exclude'. specify a parameter of type 'system.string[]' and try \r\nagain.\r\nat c:\\users\\hi\\appdata\\local\\temp\\workflow-33yil1x6\\script-019371eb-6c8f-4bb2-b0c3-96e325876971.ps1:2 char:5\r\n+ set -e\r\n+     ~~\r\n    + categoryinfo          : invalidargument: (:) [set-variable], parameterbindingexception\r\n    + fullyqualifiederrorid : missingargument,microsoft.powershell.commands.setvariablecommand\r\n \r\n",
+        "timestamp": 1742267724.6151557,
+        "system_context": {
+          "platform": {
+            "system": "Windows",
+            "release": "10",
+            "version": "10.0.19045",
+            "architecture": "AMD64",
+            "processor": "AMD64 Family 23 Model 113 Stepping 0, AuthenticAMD",
+            "hostname": "DESKTOP-DT6CF2J"
+          },
+          "docker_available": true,
+          "package_managers": {
+            "apt": false,
+            "yum": false,
+            "dnf": false,
+            "pacman": false,
+            "brew": false
+          },
+          "user": {
+            "username": "hi",
+            "uid": -1,
+            "home": "C:\\Users\\hi"
+          },
+          "hardware": {
+            "cpu_count": 24,
+            "memory_total": 34280882176,
+            "memory_available": 19950796800
+          }
+        }
+      }
+    ],
+    "successes": 0,
+    "improvements": []
   }
 }

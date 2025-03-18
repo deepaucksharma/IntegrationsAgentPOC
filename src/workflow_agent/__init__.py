@@ -1,5 +1,5 @@
 """
-Workflow Agent: A Python framework for orchestrating complex multi-step workflows.
+Workflow Agent: A Python framework for orchestrating multi-step workflows.
 """
 import logging
 import os

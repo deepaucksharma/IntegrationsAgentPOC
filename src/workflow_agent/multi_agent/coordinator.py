@@ -268,7 +268,7 @@ class CoordinatorAgent:
             if workflow_id in self._workflow_events:
                 self._workflow_events[workflow_id].set()
         
-        # Publish analyze_failure outside the lock if needed
+        # Publish analyze_failure outside the lock
         if should_analyze_failure:
             await self.message_bus.publish("analyze_failure", {
                 "workflow_id": workflow_id,
