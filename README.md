@@ -1,11 +1,15 @@
 # Workflow Agent
 
-A Python framework for orchestrating multi-step workflows with AI-driven adaptation and self-improvement capabilities.
+A Python framework for orchestrating multi-step workflows with AI-driven adaptation and self-improvement capabilities, featuring dynamic documentation-based integration.
 
 ## Overview
 
 The Workflow Agent provides a robust system for managing complex installation, removal, and verification workflows using a multi-agent architecture. It features:
 
+- Dynamic integration using documentation parsing and interpretation
+- Intelligent installation strategy selection
+- Platform-aware script generation
+- Comprehensive verification system
 - Data-driven integration using YAML definitions
 - Safe script execution with Docker isolation
 - Automatic failure analysis and self-improvement
@@ -43,26 +47,23 @@ workflow-agent verify infra_agent
 import asyncio
 from workflow_agent.core.message_bus import MessageBus
 from workflow_agent.multi_agent.coordinator import CoordinatorAgent
-from workflow_agent.multi_agent.knowledge import KnowledgeAgent
-from workflow_agent.multi_agent.script_builder import ScriptBuilderAgent
-from workflow_agent.multi_agent.execution import ExecutionAgent
-from workflow_agent.multi_agent.improvement import ImprovementAgent
+from workflow_agent.documentation.parser import DocumentationParser
+from workflow_agent.knowledge.integration import DynamicIntegrationKnowledge
+from workflow_agent.strategy.installation import InstallationStrategyAgent
+from workflow_agent.scripting.dynamic_generator import DynamicScriptGenerator
+from workflow_agent.verification.dynamic import DynamicVerificationBuilder
 
 async def run_workflow():
     # Set up multi-agent system
     message_bus = MessageBus()
     coordinator = CoordinatorAgent(message_bus)
-    knowledge_agent = KnowledgeAgent(message_bus)
-    script_builder = ScriptBuilderAgent(message_bus)
-    execution_agent = ExecutionAgent(message_bus)
-    improvement_agent = ImprovementAgent(message_bus)
     
-    # Initialize agents
-    await coordinator.initialize()
-    await knowledge_agent.initialize()
-    await script_builder.initialize()
-    await execution_agent.initialize()
-    await improvement_agent.initialize()
+    # Initialize dynamic components
+    doc_parser = DocumentationParser()
+    knowledge = DynamicIntegrationKnowledge(doc_parser)
+    strategy = InstallationStrategyAgent()
+    script_generator = DynamicScriptGenerator()
+    verification_builder = DynamicVerificationBuilder()
     
     # Define workflow state
     state = {
@@ -72,16 +73,37 @@ async def run_workflow():
         "parameters": {
             "license_key": "YOUR_LICENSE_KEY",
             "host": "your.host.com"
+        },
+        "system_context": {
+            "platform": {
+                "system": "linux",
+                "distribution": "ubuntu",
+                "version": "20.04"
+            }
         }
     }
     
-    # Execute workflow
-    result = await coordinator.start_workflow(state)
-    workflow_id = result["workflow_id"]
-    final_result = await coordinator.wait_for_completion(workflow_id, timeout=60)
-    
-    # Clean up
-    await execution_agent.cleanup()
+    # Execute dynamic workflow
+    try:
+        # Enhance state with documentation knowledge
+        state = await knowledge.enhance_workflow_state(state)
+        
+        # Determine best installation strategy
+        state = await strategy.determine_best_approach(state)
+        
+        # Generate installation script
+        install_script = await script_generator.generate_from_knowledge(state)
+        
+        # Generate verification script
+        verify_script = await verification_builder.build_verification_script(state)
+        
+        # Execute scripts (using your execution system)
+        result = await coordinator.execute_scripts(install_script, verify_script)
+        
+        print(f"Workflow completed with result: {result}")
+        
+    except Exception as e:
+        print(f"Workflow failed: {e}")
 
 # Run the workflow
 asyncio.run(run_workflow())
@@ -89,13 +111,40 @@ asyncio.run(run_workflow())
 
 ## Architecture
 
-The system uses a multi-agent architecture:
+The system uses a dynamic documentation-based architecture with these key components:
 
-- **CoordinatorAgent**: Orchestrates the workflow and manages state
-- **KnowledgeAgent**: Retrieves integration documentation and metadata
-- **ScriptBuilderAgent**: Generates and validates scripts
-- **ExecutionAgent**: Executes scripts with isolation and handles verification
-- **ImprovementAgent**: Analyzes failures and improves templates
+### Documentation Processing
+- **DocumentationParser**: Fetches and parses integration documentation from sources
+  - Extracts prerequisites, installation methods, and verification steps
+  - Handles different documentation formats and structures
+  - Provides structured knowledge for decision-making
+
+### Knowledge Management
+- **DynamicIntegrationKnowledge**: Enhances workflow state with documentation data
+  - Filters information based on platform compatibility
+  - Normalizes system-specific requirements
+  - Maintains context for decision-making
+
+### Installation Strategy
+- **InstallationStrategyAgent**: Determines optimal installation approach
+  - Scores methods based on platform compatibility
+  - Considers complexity and prerequisites
+  - Evaluates reliability of different approaches
+  - Adapts to system constraints
+
+### Script Generation
+- **DynamicScriptGenerator**: Creates installation scripts dynamically
+  - Generates platform-specific commands
+  - Includes prerequisite checks
+  - Handles error cases
+  - Provides progress feedback
+
+### Verification System
+- **DynamicVerificationBuilder**: Builds comprehensive verification
+  - Creates platform-aware verification scripts
+  - Includes service and process checks
+  - Validates configuration
+  - Performs port availability testing
 
 ## Configuration
 
@@ -118,22 +167,19 @@ configurable:
   max_concurrent_tasks: 5
   least_privilege_execution: true
   log_level: "INFO"
-```
-
-## Adding New Integrations
-
-Create YAML files in the appropriate directories:
-
-```
-workflow-agent/
-└── src/
-    └── workflow_agent/
-        └── integrations/
-            └── [integration_type]/
-                └── [target_name]/
-                    ├── definition.yaml  # Commands for install/remove
-                    ├── parameters.yaml  # Required parameters
-                    └── verification.yaml  # Verification commands
+  
+  # Dynamic workflow settings
+  documentation:
+    base_url: "https://docs.newrelic.com/install/"
+    cache_ttl: 3600  # Cache documentation for 1 hour
+    max_retries: 3   # Number of fetch retries
+    
+  strategy:
+    scoring_weights:
+      platform_match: 5.0
+      complexity: 3.0
+      prerequisites: 2.0
+      reliability: 4.0
 ```
 
 ## Development
@@ -147,6 +193,29 @@ pytest tests/
 
 # Run the example workflow
 python examples/test_workflow.py
+```
+
+## Adding New Documentation Sources
+
+The system can be extended to support additional documentation sources:
+
+1. Create a new parser class inheriting from `DocumentationParser`
+2. Implement the source-specific parsing logic
+3. Register the parser in the configuration
+
+Example:
+
+```python
+from workflow_agent.documentation.parser import DocumentationParser
+
+class CustomDocParser(DocumentationParser):
+    async def fetch_integration_docs(self, integration_type):
+        # Implement custom documentation fetching
+        pass
+        
+    def _extract_structured_knowledge(self, content):
+        # Implement custom parsing logic
+        pass
 ```
 
 ## License
