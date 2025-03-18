@@ -1,21 +1,28 @@
-"""Configuration management for workflow agent."""
-from .configuration import ensure_workflow_config, WorkflowConfiguration, dangerous_patterns
+"""
+Configuration components for workflow agent.
+"""
+from .configuration import (
+    WorkflowConfiguration,
+    ensure_workflow_config,
+)
 from .loader import load_config_file, find_default_config, merge_configs
 from .templates import (
-    render_template, get_template, load_templates, reload_templates,
-    initialize_template_environment
+    initialize_template_environment,
+    load_templates,
+    get_template,
+    render_template,
+    reload_templates,
 )
 
 __all__ = [
-    "ensure_workflow_config",
     "WorkflowConfiguration",
-    "dangerous_patterns",
+    "ensure_workflow_config",
     "load_config_file",
     "find_default_config",
     "merge_configs",
-    "render_template",
-    "get_template",
+    "initialize_template_environment",
     "load_templates",
+    "get_template",
+    "render_template",
     "reload_templates",
-    "initialize_template_environment"
 ]

@@ -1,0 +1,15 @@
+{% import "macros/common.sh.j2" as common %}
+#!/bin/bash
+
+{{ common.setup_logging() }}
+{{ common.error_handling() }}
+
+# Stop the monitoring agent (simulated)
+log_info "Stopping monitoring agent..."
+sleep 1
+
+# Remove installation directory
+log_info "Removing installation directory..."
+rm -rf /opt/monitoring
+
+log_info "Monitoring agent removed successfully!" 

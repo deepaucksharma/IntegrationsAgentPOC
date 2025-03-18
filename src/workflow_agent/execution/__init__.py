@@ -1,4 +1,6 @@
-"""Execution components for workflow agent."""
+"""
+Execution components for workflow agent.
+"""
 from .executor import ScriptExecutor, ResourceLimiter
 from .isolation import run_script_direct, run_script_docker
 

@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -e
+
+{% from "macros/common.sh.j2" import log_message %}
+{{ log_message("INFO", "Starting verification for " + template_data.get("name", "unknown")) }}
+
+{% if verification_data %}
+  {% set verify_cmd = verification_data.get(template_data.get('name', '').lower() + '-verify', 'echo "No verification command available"') %}
+  {{ log_message("INFO", "Running verification command") }}
+  {{ verify_cmd }}
+{% else %}
+  {{ log_message("WARN", "No verification data provided") }}
+  echo "No verification data provided."
+{% endif %}

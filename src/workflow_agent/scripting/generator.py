@@ -1,73 +1,60 @@
-"""Script generation for workflow agent."""
 import logging
-import re
+import os
+import json
 from typing import Dict, Any, Optional
-
+from jinja2 import Environment, FileSystemLoader, ChoiceLoader
+from pathlib import Path
 from ..core.state import WorkflowState
-from ..config.templates import render_template
-from ..utils.system import get_system_context
-from ..integrations.registry import IntegrationRegistry
+from ..config.configuration import ensure_workflow_config
 
 logger = logging.getLogger(__name__)
 
 class ScriptGenerator:
-    """Generates scripts from templates."""
-    
     def __init__(self, history_manager=None):
         self.history_manager = history_manager
+
+    async def generate_script(self, state: WorkflowState, config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        if not state.template_path:
+            return {"error": "No template path provided by integration."}
         
-    async def generate_script(
-        self,
-        state: WorkflowState,
-        config: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
-        if not state.target_name or not state.action:
-            return {"error": "Missing target_name or action"}
+        workflow_config = ensure_workflow_config(config or {})
+        template_full_path = Path(state.template_path)
+        if not template_full_path.is_absolute():
+            template_full_path = (Path(".") / state.template_path).resolve()
         
-        if state.integration_type:
-            integration_handler = IntegrationRegistry.get_integration(state.integration_type)
-            if integration_handler:
-                try:
-                    handler = integration_handler()
-                    result = await handler.handle(state, config)
-                    if "script" in result:
-                        return result
-                except Exception as e:
-                    logger.error(f"Integration handler error: {e}")
+        # Define all possible template directories
+        template_dirs = [
+            Path(__file__).parent.parent / "integrations" / "common_templates",
+            Path.cwd() / "src" / "workflow_agent" / "integrations" / "common_templates",
+            template_full_path.parent
+        ]
         
-        template_key = f"{state.target_name}-{state.action}"
-        script = render_template(template_key, {
-            "target_name": state.target_name,
-            "action": state.action,
-            "parameters": state.parameters,
-            "system_context": state.system_context or get_system_context()
-        })
+        # Filter to only existing directories
+        template_dirs = [str(d) for d in template_dirs if d.exists()]
+        if not template_dirs:
+            return {"error": "No valid template directories found"}
         
-        if not script:
-            return {"error": f"No template found for {template_key} and no integration handler provided a script"}
-        
-        if config and config.get("rule_based_optimization", False):
-            script = self._apply_optimization(script, state)
-        
-        return {
-            "script": script,
-            "template_key": template_key
-        }
-    
-    def _apply_optimization(self, script: str, state: WorkflowState) -> str:
-        if "set -e" in script and "set -o pipefail" not in script:
-            script = script.replace("set -e", "set -e\nset -o pipefail")
-        
-        if "log_message" not in script:
-            script = re.sub(
-                r'(#!/usr/bin/env bash\n)',
-                r'\1\n# Add logging function\nlog_message() {\n    echo "[$(date "+%Y-%m-%d %H:%M:%S")] $1"\n}\n\n',
-                script
+        try:
+            # Set up Jinja2 environment with multiple template directories
+            env = Environment(
+                loader=ChoiceLoader([FileSystemLoader(d) for d in template_dirs]),
+                trim_blocks=True,
+                lstrip_blocks=True
             )
-        
-        script = re.sub(
-            r'mkdir\s+([^-])',
-            r'mkdir -p \1',
-            script
-        )
-        return script
+            
+            # Add necessary filters
+            env.filters['to_json'] = lambda v: json.dumps(v)
+            
+            # Load and render the template
+            template = env.get_template(template_full_path.name)
+            script = template.render(
+                action=state.action,
+                target_name=state.target_name,
+                parameters=state.parameters,
+                template_data=state.template_data or {},
+                verification_data=state.verification_data or {}
+            )
+            return {"script": script}
+        except Exception as e:
+            logger.error(f"Error rendering script: {e}")
+            return {"error": str(e)}

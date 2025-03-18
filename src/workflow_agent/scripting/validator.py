@@ -1,111 +1,62 @@
-"""Script validation for workflow agent."""
 import logging
 import re
 import tempfile
 import os
 import subprocess
 import json
-from typing import Dict, Any, Optional, List
-
+from typing import Dict, Any, Optional
 from ..core.state import WorkflowState
-from ..config.configuration import dangerous_patterns, ensure_workflow_config
+from ..config.configuration import ensure_workflow_config, dangerous_patterns
 
 logger = logging.getLogger(__name__)
 
 class ScriptValidator:
-    """Validates scripts for security, correctness, and best practices."""
-    
-    async def validate_script(
-        self,
-        state: WorkflowState,
-        config: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
+    async def validate_script(self, state: WorkflowState, config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         if not state.script:
-            logger.error("No script to validate")
             return {"error": "No script to validate."}
         
-        logger.info(f"Validating script for {state.action} on {state.target_name}")
-        
         workflow_config = ensure_workflow_config(config or {})
+        script_content = state.script
         warnings = []
-        
-        # Check for dangerous patterns
-        dangerous_found = []
+
+        # Check for known dangerous patterns
         for pattern in dangerous_patterns:
-            matches = re.findall(pattern, state.script, re.IGNORECASE | re.MULTILINE)
-            if matches:
-                dangerous_found.append(pattern)
-        
-        if dangerous_found:
-            logger.warning(f"Potentially dangerous patterns found: {dangerous_found}")
-            warnings.append("Script contains potentially dangerous patterns")
-        
-        if "#!/usr/bin/env bash" not in state.script and "#!/bin/bash" not in state.script:
-            logger.warning("Script is missing shebang")
+            if re.search(pattern, script_content, re.IGNORECASE):
+                logger.warning(f"Dangerous pattern detected: {pattern}")
+                return {"error": f"Dangerous pattern found: {pattern}"}
+
+        if "#!/usr/bin/env bash" not in script_content:
             warnings.append("Script is missing shebang (#!/usr/bin/env bash)")
-        
-        if "set -e" not in state.script:
-            logger.warning("Script is missing error handling (set -e)")
-            warnings.append("Script is missing error handling (set -e)")
-        
-        # Check for potential command injection in parameters
-        for key, value in state.parameters.items():
-            if isinstance(value, str) and any(c in value for c in ";|&`$(){}[]<>\\"):
-                logger.warning(f"Parameter '{key}' might contain command injection characters")
-                warnings.append(f"Parameter '{key}' might contain command injection characters")
-        
-        # Perform static analysis with ShellCheck if enabled
+        if "set -e" not in script_content:
+            warnings.append("Script is missing 'set -e' for error handling")
+
         if workflow_config.use_static_analysis:
-            # The shellcheck-py package provides shellcheck via shellcheck_py.SHELLCHECK_PATH
             try:
                 import shellcheck_py
-                with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.sh') as tf:
-                    script_path = tf.name
-                    tf.write(state.script)
-                
+                shellcheck_bin = shellcheck_py.SHELLCHECK_PATH
+                with tempfile.NamedTemporaryFile(mode="w", suffix=".sh", delete=False) as tf:
+                    tf.write(script_content)
+                    tmp_path = tf.name
                 try:
-                    shellcheck_bin = shellcheck_py.SHELLCHECK_PATH
-                    cmd = [shellcheck_bin, '--format=json1', script_path]
-                    proc = subprocess.run(cmd, capture_output=True, text=True)
-                    
-                    # ShellCheck can return exit code 0 or 1 (issues found) but both produce JSON
+                    proc = subprocess.run([shellcheck_bin, "--format=json1", tmp_path],
+                                          capture_output=True, text=True)
                     if proc.stdout.strip():
                         try:
                             data = json.loads(proc.stdout)
-                            comments = data.get('comments', [])
-                            shellcheck_warnings = []
-                            for comment in comments:
-                                lvl = comment.get('level', '').lower()
-                                message = comment.get('message', '')
-                                if lvl == 'error':
-                                    shellcheck_warnings.append(f"ShellCheck error: {message}")
-                                elif lvl == 'warning':
-                                    shellcheck_warnings.append(f"ShellCheck warning: {message}")
-                            if shellcheck_warnings:
-                                logger.warning(f"ShellCheck found {len(shellcheck_warnings)} issues")
-                                warnings.extend(shellcheck_warnings)
+                            for cmt in data.get("comments", []):
+                                lvl = cmt.get("level")
+                                msg = cmt.get("message")
+                                if lvl in ["error", "warning"]:
+                                    warnings.append(f"ShellCheck {lvl}: {msg}")
                         except json.JSONDecodeError:
-                            logger.warning(f"ShellCheck output was not valid JSON: {proc.stdout}")
-                            warnings.append("ShellCheck returned invalid JSON output.")
-                    
-                    if proc.stderr.strip():
-                        logger.debug(f"ShellCheck stderr: {proc.stderr.strip()}")
+                            warnings.append("ShellCheck output not JSON-decodable.")
+                except FileNotFoundError:
+                    warnings.append("ShellCheck binary not found.")
                 finally:
-                    os.unlink(script_path)
-            
+                    os.unlink(tmp_path)
             except ImportError:
-                logger.info("ShellCheck (shellcheck-py) not installed; skipping static analysis")
-        
-        if dangerous_found:
-            logger.error("Script validation failed due to dangerous patterns")
-            return {
-                "error": "Script validation failed: dangerous patterns detected.",
-                "warnings": warnings
-            }
-        
+                logger.info("ShellCheck not installed, skipping static analysis.")
+
         if warnings:
-            logger.info(f"Script validation passed with {len(warnings)} warnings")
             return {"warnings": warnings}
-        
-        logger.info("Script validation passed successfully")
         return {}

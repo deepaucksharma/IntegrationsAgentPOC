@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -e
+
+{% from "macros/common.sh.j2" import log_message %}
+{{ log_message("INFO", "Starting install for " + template_data.get("name", "unknown")) }}
+
+{% for cmd in template_data.get('install', {}).get('commands', []) %}
+{{ cmd }}
+{% endfor %}
+
+echo "Install complete."

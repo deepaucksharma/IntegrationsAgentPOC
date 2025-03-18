@@ -1,245 +1,154 @@
-Below is a detailed README.md file tailored for the Workflow Agent project. It provides instructions to set up, run, and generate scripts for all supported integrations (currently just InfraAgentIntegration, as it’s the only one in the provided codebase). The README assumes a user wants to explore the framework’s capabilities, focusing on script generation, and includes prerequisites, installation steps, configuration details, and examples.
+# Workflow Agent
 
-Workflow Agent
-A Python framework for orchestrating multi-step workflows with AI-driven adaptation, script generation, execution, validation, and rollback capabilities.
+A Python framework for orchestrating multi-step workflows with AI-driven adaptation and self-improvement capabilities.
 
-Overview
-The Workflow Agent is designed to automate complex workflows by generating, validating, and executing scripts based on templates or integration handlers. It supports isolation (e.g., Docker), resource management, execution history tracking, and automatic rollback on failure. This README guides you through setting up the project and generating scripts for all supported integrations.
+## Overview
 
-Features
-Script Generation: Generate Bash scripts from Jinja2 templates or integration handlers.
-Validation: Validate scripts for security and correctness using static analysis (e.g., ShellCheck).
-Execution: Run scripts with isolation (Docker or direct) and resource limits.
-Verification: Check execution results for success.
-Rollback: Automatically revert changes on failure.
-History: Store execution details in a SQLite database.
-Supported Integrations
-Currently, the only built-in integration is:
+The Workflow Agent provides a robust system for managing complex installation, removal, and verification workflows using a multi-agent architecture. It features:
 
-InfraAgentIntegration: Handles infrastructure monitoring agent tasks (e.g., monitoring_agent, infra_agent, metrics_agent) with actions like install, remove, and verify.
-Prerequisites
-Python: Version 3.8 or higher.
-Operating System: Linux/macOS (Windows support is partial due to Bash script reliance).
-Docker: Optional, for isolated execution (install via Docker's official guide).
-ShellCheck: Optional, for static script analysis (install via sudo apt install shellcheck on Ubuntu or equivalent).
-Installation
-Clone the Repository
+- Data-driven integration using YAML definitions
+- Safe script execution with Docker isolation
+- Automatic failure analysis and self-improvement
+- Comprehensive logging and execution history
 
-bash
+## Installation
 
-Collapse
-
-Wrap
-
-Copy
-git clone <repository-url>
+```bash
+# Clone the repository
+git clone https://github.com/yourusername/workflow-agent.git
 cd workflow-agent
-Set Up a Virtual Environment
 
-bash
+# Install the package
+pip install -e .
+```
 
-Collapse
+## Usage
 
-Wrap
+### Command Line Interface
 
-Copy
-python3 -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-Install Dependencies
+```bash
+# Install an integration
+workflow-agent install infra_agent --license-key=YOUR_LICENSE_KEY --host=YOUR_HOST
 
-Use the provided requirements.txt:
-bash
+# Remove an integration
+workflow-agent remove infra_agent
 
-Collapse
+# Verify an integration
+workflow-agent verify infra_agent
+```
 
-Wrap
+### Programmatic Usage
 
-Copy
-pip install -r requirements.txt
-For development tools (e.g., black, pylint, shellcheck-py):
-bash
+```python
+import asyncio
+from workflow_agent.core.message_bus import MessageBus
+from workflow_agent.multi_agent.coordinator import CoordinatorAgent
+from workflow_agent.multi_agent.knowledge import KnowledgeAgent
+from workflow_agent.multi_agent.script_builder import ScriptBuilderAgent
+from workflow_agent.multi_agent.execution import ExecutionAgent
+from workflow_agent.multi_agent.improvement import ImprovementAgent
 
-Collapse
+async def run_workflow():
+    # Set up multi-agent system
+    message_bus = MessageBus()
+    coordinator = CoordinatorAgent(message_bus)
+    knowledge_agent = KnowledgeAgent(message_bus)
+    script_builder = ScriptBuilderAgent(message_bus)
+    execution_agent = ExecutionAgent(message_bus)
+    improvement_agent = ImprovementAgent(message_bus)
+    
+    # Initialize agents
+    await coordinator.initialize()
+    await knowledge_agent.initialize()
+    await script_builder.initialize()
+    await execution_agent.initialize()
+    await improvement_agent.initialize()
+    
+    # Define workflow state
+    state = {
+        "action": "install",
+        "target_name": "monitoring_agent",
+        "integration_type": "infra_agent",
+        "parameters": {
+            "license_key": "YOUR_LICENSE_KEY",
+            "host": "your.host.com"
+        }
+    }
+    
+    # Execute workflow
+    result = await coordinator.start_workflow(state)
+    workflow_id = result["workflow_id"]
+    final_result = await coordinator.wait_for_completion(workflow_id, timeout=60)
+    
+    # Clean up
+    await execution_agent.cleanup()
 
-Wrap
+# Run the workflow
+asyncio.run(run_workflow())
+```
 
-Copy
-pip install -e ".[dev]"
-Note: If you plan to use ShellCheck, ensure shellcheck-py is installed and ShellCheck is available on your system.
+## Architecture
 
-Verify Installation
+The system uses a multi-agent architecture:
 
-bash
+- **CoordinatorAgent**: Orchestrates the workflow and manages state
+- **KnowledgeAgent**: Retrieves integration documentation and metadata
+- **ScriptBuilderAgent**: Generates and validates scripts
+- **ExecutionAgent**: Executes scripts with isolation and handles verification
+- **ImprovementAgent**: Analyzes failures and improves templates
 
-Collapse
+## Configuration
 
-Wrap
+Configuration is managed through YAML files. Default locations:
+- `./workflow_config.yaml`
+- `~/.workflow_agent/config.yaml`
 
-Copy
-python -c "import workflow_agent; print(workflow_agent.__version__)"
-Output should be 0.2.0.
-
-Configuration
-The project uses a workflow_config.yaml file for settings. A default is provided, but you can customize it.
-
-Default Configuration (workflow_config.yaml)
-yaml
-
-Collapse
-
-Wrap
-
-Copy
+```yaml
 configurable:
   user_id: "test_user"
-  template_dir: "./templates"
-  custom_template_dir: "./custom_templates"
+  template_dir: "./integrations/common_templates"
   use_isolation: true
-  isolation_method: "docker"
+  isolation_method: "docker"  # or "direct"
   execution_timeout: 30000
   skip_verification: false
   rule_based_optimization: true
   use_static_analysis: true
   db_connection_string: "workflow_history.db"
   prune_history_days: 90
-  plugin_dirs:
-    - "./plugins"
   max_concurrent_tasks: 5
   least_privilege_execution: true
   log_level: "INFO"
-Key Settings
-use_isolation: Set to false to run scripts directly (faster for testing, requires no Docker).
-isolation_method: Options are docker, chroot, venv, direct, or none (only docker and direct are fully implemented).
-log_level: Set to DEBUG for verbose output.
-template_dir: Directory for Jinja2 templates (create if using custom templates).
-To override the default config, set the WORKFLOW_CONFIG_PATH environment variable:
+```
 
-bash
+## Adding New Integrations
 
-Collapse
+Create YAML files in the appropriate directories:
 
-Wrap
+```
+workflow-agent/
+└── src/
+    └── workflow_agent/
+        └── integrations/
+            └── [integration_type]/
+                └── [target_name]/
+                    ├── definition.yaml  # Commands for install/remove
+                    ├── parameters.yaml  # Required parameters
+                    └── verification.yaml  # Verification commands
+```
 
-Copy
-export WORKFLOW_CONFIG_PATH="/path/to/custom_config.yaml"
-Running the Project
-Generating Scripts for All Supported Integrations
-The InfraAgentIntegration supports targets monitoring_agent, infra_agent, and metrics_agent with actions install, remove, and verify. Below is a Python script to generate scripts for all combinations.
+## Development
 
-Create a Script (generate_scripts.py) Save this in the project root:
-python
+```bash
+# Install dev dependencies
+pip install -e ".[dev]"
 
-Collapse
+# Run tests
+pytest tests/
 
-Wrap
+# Run the example workflow
+python examples/test_workflow.py
+```
 
-Copy
-import asyncio
-import yaml
-import logging
-from src.workflow_agent.agent import WorkflowAgent
-from src.workflow_agent.utils.logging import setup_logging
+## License
 
-async def generate_scripts():
-    # Load configuration
-    with open("workflow_config.yaml", "r") as f:
-        config = yaml.safe_load(f)
-    config["configurable"]["use_isolation"] = False  # Speed up for demo
-    config["configurable"]["log_level"] = "DEBUG"
-
-    # Set up logging
-    setup_logging(log_level=config["configurable"]["log_level"])
-
-    # Targets and actions for InfraAgentIntegration
-    targets = ["monitoring_agent", "infra_agent", "metrics_agent"]
-    actions = ["install", "remove", "verify"]
-    integration_type = "infra_agent"
-
-    agent = WorkflowAgent()
-    await agent.initialize(config)
-
-    for target in targets:
-        for action in actions:
-            # Define input state
-            state = {
-                "action": action,
-                "target_name": target,
-                "integration_type": integration_type,
-                "parameters": {
-                    "license_key": "test_license_123",
-                    "endpoint": "https://example-metrics.com"
-                }
-            }
-            print(f"\nGenerating script for {target} - {action}")
-            result = await agent.invoke(state, config)
-            if "script" in result:
-                print(f"Generated Script:\n{result['script']}\n")
-            elif "error" in result:
-                print(f"Error: {result['error']}")
-            else:
-                print("No script generated, check logs.")
-
-    await agent.cleanup()
-
-if __name__ == "__main__":
-    asyncio.run(generate_scripts())
-Run the Script
-bash
-
-Collapse
-
-Wrap
-
-Copy
-python generate_scripts.py
-Output: The script will print generated Bash scripts for each target-action pair (e.g., monitoring_agent-install, infra_agent-remove). Errors, if any, will be logged with details.
-What Happens
-The WorkflowAgent.invoke method processes the input state:
-Validates parameters (e.g., license_key is required).
-Generates a script via InfraAgentIntegration.handle.
-Validates the script (e.g., checks for shebang, dangerous patterns).
-Executes it (skipped here since use_isolation=false and we’re focusing on generation).
-Scripts are tailored to the target and action, with system detection (e.g., Debian vs. RHEL).
-Customizing Templates
-To use custom templates instead of the integration handler:
-
-Create a templates directory:
-bash
-
-Collapse
-
-Wrap
-
-Copy
-mkdir templates
-Add a template (e.g., monitoring_agent-install.j2):
-bash
-
-Collapse
-
-Wrap
-
-Copy
-#!/usr/bin/env bash
-set -e
-echo "Custom install for {{ target_name }}"
-echo "License: {{ parameters.license_key }}"
-Update state in generate_scripts.py to remove integration_type or set it to an unrecognized value, forcing template fallback.
-Troubleshooting
-No Script Generated: Check logs (set log_level: "DEBUG") for template or integration errors.
-Permission Denied: Ensure the script directory is writable and Docker (if used) is running.
-ShellCheck Errors: Install shellcheck-py and ShellCheck if static analysis fails.
-Database Issues: Verify workflow_history.db is writable; delete it to reset history.
-Testing
-Run the included test script:
-
-bash
-
-Collapse
-
-Wrap
-
-Copy
-python test_workflow.py
-Tests monitoring_agent installation with a mock license_key.
-Modify use_isolation in the config for faster runs.
+MIT License

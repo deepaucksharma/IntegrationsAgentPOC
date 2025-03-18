@@ -1,23 +1,35 @@
-"""Configuration management for workflow agent."""
-import os
+"""
+Configuration management for workflow agent.
+"""
 import logging
-import re
+import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-import yaml
-import json
+from ..error.exceptions import ConfigurationError
 
 logger = logging.getLogger(__name__)
 
-# Valid isolation methods
 VALID_ISOLATION_METHODS = {"docker", "chroot", "venv", "direct", "none"}
 
+dangerous_patterns: List[str] = [
+    r"rm\s+(-rf?\s+)?\/(?!\w)",
+    r"mkfs",
+    r"dd\s+if=.*\s+of=\/dev",
+    r">\s*\/dev\/[hs]d[a-z]",
+    r"chmod\s+777",
+    r"wget.*\s+\|\s+bash",
+    r"curl.*\s+\|\s+bash",
+    r":(){:\|:&};:",
+    r"rm\s+-rf\s+~",
+    r">\s*\/etc\/passwd"
+]
+
 class WorkflowConfiguration:
-    """Configuration for the workflow agent."""
+    """Container for agent-level configuration."""
     def __init__(
         self,
         user_id: str = "cli-user",
-        template_dir: str = "./templates",
+        template_dir: Optional[str] = None,
         custom_template_dir: Optional[str] = None,
         use_isolation: bool = True,
         isolation_method: str = "docker",
@@ -32,15 +44,23 @@ class WorkflowConfiguration:
         least_privilege_execution: bool = True,
         log_level: str = "INFO"
     ):
-        self.user_id = user_id
-        self.template_dir = template_dir
-        self.custom_template_dir = custom_template_dir
-        self.use_isolation = use_isolation
-        
         if isolation_method not in VALID_ISOLATION_METHODS:
             raise ValueError(f"Invalid isolation method: {isolation_method}")
-        self.isolation_method = isolation_method
         
+        self.user_id = user_id
+        
+        # Use absolute path for template_dir
+        if template_dir is None:
+            self.template_dir = str(Path(__file__).resolve().parent.parent / "integrations" / "common_templates")
+        else:
+            self.template_dir = os.path.abspath(template_dir)
+            
+        self.custom_template_dir = custom_template_dir
+        if custom_template_dir:
+            self.custom_template_dir = os.path.abspath(custom_template_dir)
+            
+        self.use_isolation = use_isolation
+        self.isolation_method = isolation_method
         self.execution_timeout = execution_timeout
         self.skip_verification = skip_verification
         self.rule_based_optimization = rule_based_optimization
@@ -52,32 +72,13 @@ class WorkflowConfiguration:
         self.least_privilege_execution = least_privilege_execution
         self.log_level = log_level
 
-def ensure_workflow_config(config: Optional[Dict[str, Any]] = None) -> WorkflowConfiguration:
-    """Ensure a valid workflow configuration exists."""
-    if config is None:
+def ensure_workflow_config(config: Optional[Dict[str, Any]] = None) -> "WorkflowConfiguration":
+    """Ensure a valid WorkflowConfiguration object exists."""
+    if not config:
         config = {}
-    
-    # If nested under "configurable", flatten it
     if "configurable" in config:
         config = config["configurable"]
-    
     try:
         return WorkflowConfiguration(**config)
     except Exception as e:
-        from ..error.exceptions import ConfigurationError
         raise ConfigurationError(f"Invalid configuration: {e}")
-
-# List of dangerous command patterns for script validation
-dangerous_patterns: List[str] = [
-    r"rm\s+(-rf?\s+)?\/(?!\w)",
-    r"mkfs",
-    r"dd\s+if=.*\s+of=\/dev",
-    r">\s*\/dev\/[hs]d[a-z]",
-    r"chmod\s+777",
-    r"chmod\s+-R\s+777",
-    r"wget.*\s+\|\s+bash",
-    r"curl.*\s+\|\s+bash",
-    r":(){:\|:&};:",
-    r"rm\s+-rf\s+~",
-    r">\s*\/etc\/passwd"
-]

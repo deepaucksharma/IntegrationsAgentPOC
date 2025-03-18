@@ -1,8 +1,6 @@
-"""System utility functions for workflow agent."""
 import os
 import platform
 import socket
-import subprocess
 import logging
 import psutil
 import shutil
@@ -12,7 +10,9 @@ from typing import Dict, Any, Optional, List
 logger = logging.getLogger(__name__)
 
 def get_system_context() -> Dict[str, Any]:
-    """Get information about the current system environment."""
+    """
+    Gather basic system context data for environment-based script customization.
+    """
     return {
         "platform": {
             "system": platform.system(),
@@ -32,7 +32,7 @@ def get_system_context() -> Dict[str, Any]:
         },
         "user": {
             "username": os.getenv("USER", os.getenv("USERNAME", "unknown")),
-            "uid": os.getuid() if hasattr(os, "getuid") else None,
+            "uid": os.getuid() if hasattr(os, "getuid") else -1,
             "home": os.path.expanduser("~")
         },
         "hardware": {
@@ -42,45 +42,27 @@ def get_system_context() -> Dict[str, Any]:
         }
     }
 
-async def execute_command(
-    command: List[str],
-    timeout: Optional[int] = None,
-    capture_output: bool = True
-) -> Dict[str, Any]:
-    """Execute a system command safely."""
+async def execute_command(command: List[str], timeout: Optional[int] = None, capture_output: bool = True) -> Dict[str, Any]:
+    """
+    Execute a shell command asynchronously with optional timeout and output capture.
+    """
     try:
-        process = await asyncio.create_subprocess_exec(
+        proc = await asyncio.create_subprocess_exec(
             *command,
             stdout=asyncio.subprocess.PIPE if capture_output else None,
             stderr=asyncio.subprocess.PIPE if capture_output else None
         )
-        
         try:
-            stdout, stderr = await asyncio.wait_for(
-                process.communicate(),
-                timeout=timeout
-            )
-            
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
             return {
-                "success": process.returncode == 0,
-                "return_code": process.returncode,
-                "stdout": stdout.decode('utf-8') if stdout else "",
-                "stderr": stderr.decode('utf-8') if stderr else "",
+                "success": proc.returncode == 0,
+                "return_code": proc.returncode,
+                "stdout": stdout.decode("utf-8") if stdout else "",
+                "stderr": stderr.decode("utf-8") if stderr else "",
                 "command": " ".join(command)
             }
         except asyncio.TimeoutError:
-            process.kill()
-            return {
-                "success": False,
-                "timeout": True,
-                "return_code": None,
-                "command": " ".join(command),
-                "error": f"Command timeout after {timeout}s"
-            }
+            proc.kill()
+            return {"success": False, "return_code": None, "command": " ".join(command), "error": f"Command timeout after {timeout}s"}
     except Exception as e:
-        return {
-            "success": False,
-            "return_code": None,
-            "command": " ".join(command),
-            "error": str(e)
-        }
+        return {"success": False, "return_code": None, "command": " ".join(command), "error": str(e)}

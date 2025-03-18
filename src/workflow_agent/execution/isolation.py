@@ -1,4 +1,6 @@
-"""Isolation methods for script execution."""
+"""
+Isolation methods for script execution.
+"""
 import os
 import uuid
 import tempfile
@@ -16,14 +18,12 @@ async def run_script_direct(
     """Execute the script directly on the host system."""
     process = None
     timeout_sec = timeout_ms / 1000
-    
     try:
         process = await asyncio.create_subprocess_exec(
             script_path,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
-        
         try:
             stdout, stderr = await asyncio.wait_for(
                 process.communicate(),
@@ -66,25 +66,29 @@ async def run_script_docker(
     least_privilege: bool = True
 ) -> Tuple[bool, str, str, int, Optional[str]]:
     """Execute the script in an isolated Docker container."""
-    # Check if Docker is available
+    # Check Docker availability
     try:
         process = await asyncio.create_subprocess_exec(
             "docker", "--version",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
-        await process.wait()
-        if process.returncode != 0:
-            logger.warning("Docker not available, falling back to direct execution")
+        try:
+            await asyncio.wait_for(process.wait(), timeout=5.0)
+            if process.returncode != 0:
+                logger.warning("Docker not available, falling back to direct execution")
+                return await run_script_direct(script_path, timeout_ms)
+        except asyncio.TimeoutError:
+            process.kill()
+            logger.warning("Docker check timed out, falling back to direct execution")
             return await run_script_direct(script_path, timeout_ms)
-    except Exception:
-        logger.warning("Docker not available, falling back to direct execution")
+    except Exception as e:
+        logger.warning(f"Docker not available: {e}, falling back to direct execution")
         return await run_script_direct(script_path, timeout_ms)
     
     temp_dir = tempfile.mkdtemp(prefix='workflow-docker-')
     container_script_path = os.path.join(temp_dir, os.path.basename(script_path))
     shutil.copy2(script_path, container_script_path)
-    
     container_name = f"workflow-{uuid.uuid4().hex[:8]}"
     docker_image = "alpine:latest"
     docker_cmd = ["docker", "run", "--rm", "--name", container_name]
@@ -102,7 +106,6 @@ async def run_script_docker(
     
     process = None
     timeout_sec = timeout_ms / 1000
-    
     try:
         logger.info(f"Running script in Docker container: {container_name}")
         process = await asyncio.create_subprocess_exec(
@@ -110,7 +113,6 @@ async def run_script_docker(
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
-        
         try:
             stdout, stderr = await asyncio.wait_for(
                 process.communicate(),
@@ -119,7 +121,7 @@ async def run_script_docker(
             stdout_str = stdout.decode('utf-8')
             stderr_str = stderr.decode('utf-8')
             success = process.returncode == 0
-            error_message = None if success else f"Script execution in container failed with return code {process.returncode}"
+            error_message = None if success else f"Container failed with return code {process.returncode}"
             return success, stdout_str, stderr_str, process.returncode, error_message
         except asyncio.TimeoutError:
             logger.error(f"Container execution timed out after {timeout_sec}s")
@@ -155,7 +157,6 @@ async def run_script_docker(
             await kill_process.wait()
         except:
             pass
-        
         if process:
             process.kill()
             try:
@@ -168,6 +169,20 @@ async def run_script_docker(
             stdout_str, stderr_str = "", str(err)
         return False, stdout_str, stderr_str, 1, f"Container execution failed: {stderr_str}"
     finally:
+        # Ensure container is removed
+        try:
+            container_remove_process = await asyncio.create_subprocess_exec(
+                "docker", "rm", "-f", container_name,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            try:
+                await asyncio.wait_for(container_remove_process.wait(), timeout=5.0)
+            except asyncio.TimeoutError:
+                container_remove_process.kill()
+        except Exception as e:
+            logger.warning(f"Error removing container {container_name}: {e}")
+            
         try:
             if os.path.exists(container_script_path):
                 os.unlink(container_script_path)

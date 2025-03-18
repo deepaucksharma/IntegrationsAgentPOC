@@ -1,0 +1,17 @@
+configurable:
+  user_id: "test_user"
+  template_dir: "./integrations/common_templates"
+  custom_template_dir: null
+  use_isolation: false
+  isolation_method: "direct"
+  execution_timeout: 30000
+  skip_verification: false
+  rule_based_optimization: true
+  use_static_analysis: true
+  db_connection_string: "workflow_history.db"
+  prune_history_days: 90
+  plugin_dirs:
+    - "./plugins"
+  max_concurrent_tasks: 5
+  least_privilege_execution: true
+  log_level: "DEBUG" 

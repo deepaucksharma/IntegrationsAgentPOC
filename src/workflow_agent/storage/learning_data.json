@@ -1,0 +1,239 @@
+{
+  "infra_agent_monitoring_agent_install": {
+    "failures": [
+      {
+        "error": "no loader for this environment specified",
+        "root_cause": "no_output",
+        "timestamp": null,
+        "system_context": {
+          "platform": {
+            "system": "Windows",
+            "release": "10",
+            "version": "10.0.19045",
+            "architecture": "AMD64",
+            "processor": "AMD64 Family 23 Model 113 Stepping 0, AuthenticAMD",
+            "hostname": "DESKTOP-DT6CF2J"
+          },
+          "docker_available": true,
+          "package_managers": {
+            "apt": false,
+            "yum": false,
+            "dnf": false,
+            "pacman": false,
+            "brew": false
+          },
+          "user": {
+            "username": "hi",
+            "uid": -1,
+            "home": "C:\\Users\\hi"
+          },
+          "hardware": {
+            "cpu_count": 24,
+            "memory_total": 34280882176,
+            "memory_available": 21481689088
+          }
+        }
+      },
+      {
+        "error": "no loader for this environment specified",
+        "root_cause": "no_output",
+        "timestamp": null,
+        "system_context": {
+          "platform": {
+            "system": "Windows",
+            "release": "10",
+            "version": "10.0.19045",
+            "architecture": "AMD64",
+            "processor": "AMD64 Family 23 Model 113 Stepping 0, AuthenticAMD",
+            "hostname": "DESKTOP-DT6CF2J"
+          },
+          "docker_available": true,
+          "package_managers": {
+            "apt": false,
+            "yum": false,
+            "dnf": false,
+            "pacman": false,
+            "brew": false
+          },
+          "user": {
+            "username": "hi",
+            "uid": -1,
+            "home": "C:\\Users\\hi"
+          },
+          "hardware": {
+            "cpu_count": 24,
+            "memory_total": 34280882176,
+            "memory_available": 21436780544
+          }
+        }
+      },
+      {
+        "error": "no loader for this environment specified",
+        "root_cause": "no_output",
+        "timestamp": null,
+        "system_context": {
+          "platform": {
+            "system": "Windows",
+            "release": "10",
+            "version": "10.0.19045",
+            "architecture": "AMD64",
+            "processor": "AMD64 Family 23 Model 113 Stepping 0, AuthenticAMD",
+            "hostname": "DESKTOP-DT6CF2J"
+          },
+          "docker_available": true,
+          "package_managers": {
+            "apt": false,
+            "yum": false,
+            "dnf": false,
+            "pacman": false,
+            "brew": false
+          },
+          "user": {
+            "username": "hi",
+            "uid": -1,
+            "home": "C:\\Users\\hi"
+          },
+          "hardware": {
+            "cpu_count": 24,
+            "memory_total": 34280882176,
+            "memory_available": 20970201088
+          }
+        }
+      },
+      {
+        "error": "'macros/common.sh.j2' not found in search path: 'C:\\\\Users\\\\hi\\\\Desktop\\\\SourceCode\\\\IntegrationsAgentPOC\\\\src\\\\workflow_agent\\\\integrations\\\\common_templates\\\\install'",
+        "root_cause": "no_output",
+        "timestamp": null,
+        "system_context": {
+          "platform": {
+            "system": "Windows",
+            "release": "10",
+            "version": "10.0.19045",
+            "architecture": "AMD64",
+            "processor": "AMD64 Family 23 Model 113 Stepping 0, AuthenticAMD",
+            "hostname": "DESKTOP-DT6CF2J"
+          },
+          "docker_available": true,
+          "package_managers": {
+            "apt": false,
+            "yum": false,
+            "dnf": false,
+            "pacman": false,
+            "brew": false
+          },
+          "user": {
+            "username": "hi",
+            "uid": -1,
+            "home": "C:\\Users\\hi"
+          },
+          "hardware": {
+            "cpu_count": 24,
+            "memory_total": 34280882176,
+            "memory_available": 21445001216
+          }
+        }
+      },
+      {
+        "error": "'macros/common.sh.j2' not found in search path: 'C:\\\\Users\\\\hi\\\\Desktop\\\\SourceCode\\\\IntegrationsAgentPOC\\\\src\\\\workflow_agent\\\\integrations\\\\common_templates\\\\install'",
+        "root_cause": "no_output",
+        "timestamp": null,
+        "system_context": {
+          "platform": {
+            "system": "Windows",
+            "release": "10",
+            "version": "10.0.19045",
+            "architecture": "AMD64",
+            "processor": "AMD64 Family 23 Model 113 Stepping 0, AuthenticAMD",
+            "hostname": "DESKTOP-DT6CF2J"
+          },
+          "docker_available": true,
+          "package_managers": {
+            "apt": false,
+            "yum": false,
+            "dnf": false,
+            "pacman": false,
+            "brew": false
+          },
+          "user": {
+            "username": "hi",
+            "uid": -1,
+            "home": "C:\\Users\\hi"
+          },
+          "hardware": {
+            "cpu_count": 24,
+            "memory_total": 34280882176,
+            "memory_available": 20938285056
+          }
+        }
+      },
+      {
+        "error": "'macros/common.sh.j2' not found in search path: 'C:\\\\Users\\\\hi\\\\Desktop\\\\SourceCode\\\\IntegrationsAgentPOC\\\\src\\\\workflow_agent\\\\integrations\\\\common_templates\\\\install'",
+        "root_cause": "no_output",
+        "timestamp": null,
+        "system_context": {
+          "platform": {
+            "system": "Windows",
+            "release": "10",
+            "version": "10.0.19045",
+            "architecture": "AMD64",
+            "processor": "AMD64 Family 23 Model 113 Stepping 0, AuthenticAMD",
+            "hostname": "DESKTOP-DT6CF2J"
+          },
+          "docker_available": true,
+          "package_managers": {
+            "apt": false,
+            "yum": false,
+            "dnf": false,
+            "pacman": false,
+            "brew": false
+          },
+          "user": {
+            "username": "hi",
+            "uid": -1,
+            "home": "C:\\Users\\hi"
+          },
+          "hardware": {
+            "cpu_count": 24,
+            "memory_total": 34280882176,
+            "memory_available": 20849221632
+          }
+        }
+      },
+      {
+        "error": "Error generating script: Invalid configuration: WorkflowConfiguration.__init__() got an unexpected keyword argument 'docker_image'",
+        "root_cause": "no_output",
+        "timestamp": null,
+        "system_context": {
+          "platform": {
+            "system": "Windows",
+            "release": "10",
+            "version": "10.0.19045",
+            "architecture": "AMD64",
+            "processor": "AMD64 Family 23 Model 113 Stepping 0, AuthenticAMD",
+            "hostname": "DESKTOP-DT6CF2J"
+          },
+          "docker_available": true,
+          "package_managers": {
+            "apt": false,
+            "yum": false,
+            "dnf": false,
+            "pacman": false,
+            "brew": false
+          },
+          "user": {
+            "username": "hi",
+            "uid": -1,
+            "home": "C:\\Users\\hi"
+          },
+          "hardware": {
+            "cpu_count": 24,
+            "memory_total": 34280882176,
+            "memory_available": 20659089408
+          }
+        }
+      }
+    ],
+    "successes": 0,
+    "improvements": []
+  }
+}

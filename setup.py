@@ -2,8 +2,8 @@ from setuptools import setup, find_packages
 
 setup(
     name="workflow-agent",
-    version="0.1.0",
-    description="A Python framework for orchestrating multi-step workflows with AI-driven adaptation.",
+    version="0.3.0",
+    description="A Python framework for orchestrating multi-step workflows with AI-driven adaptation",
     author="Your Name",
     author_email="you@example.com",
     packages=find_packages(where="src"),
@@ -14,6 +14,8 @@ setup(
         "typer>=0.9.0",
         "PyYAML>=6.0",
         "psutil>=5.9.5",
+        "shellcheck-py>=0.9.0.6",
+        "pydantic>=1.10.0"
     ],
     extras_require={
         "llm": ["langchain-openai>=0.0.1"],
@@ -26,7 +28,11 @@ setup(
             "shellcheck-py>=0.9.0.6"
         ],
     },
-    entry_points={},
+    entry_points={
+        "console_scripts": [
+            "workflow-agent=workflow_agent.main:app",
+        ],
+    },
     classifiers=[
         "Development Status :: 4 - Beta",
         "Intended Audience :: Developers",

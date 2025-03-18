@@ -1,9 +1,10 @@
 configurable:
   user_id: "test_user"
-  template_dir: "./templates"
-  custom_template_dir: "./custom_templates"
+  template_dir: "./integrations/common_templates"
+  custom_template_dir: null
   use_isolation: true
   isolation_method: "docker"
+  docker_image: "ubuntu:latest"
   execution_timeout: 30000
   skip_verification: false
   rule_based_optimization: true
@@ -14,4 +15,4 @@ configurable:
     - "./plugins"
   max_concurrent_tasks: 5
   least_privilege_execution: true
-  log_level: "INFO"
+  log_level: "DEBUG"

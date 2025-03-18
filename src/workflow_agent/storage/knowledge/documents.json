@@ -1,0 +1,76 @@
+{
+  "infra_agent_monitoring_agent_definition": {
+    "name": "monitoring_agent",
+    "description": "A test monitoring agent for infrastructure monitoring",
+    "version": "1.0.0",
+    "install": {
+      "template": "install/monitoring_agent.sh.j2",
+      "steps": [
+        {
+          "name": "Create directory",
+          "command": "mkdir -p /opt/monitoring"
+        },
+        {
+          "name": "Download agent",
+          "command": "echo 'Downloading agent...' && sleep 2"
+        },
+        {
+          "name": "Configure agent",
+          "command": "echo \"license_key: {{ parameters.license_key }}\" > /opt/monitoring/config.yaml\necho \"host: {{ parameters.host }}\" >> /opt/monitoring/config.yaml\n"
+        },
+        {
+          "name": "Start agent",
+          "command": "echo 'Starting agent...' && sleep 1"
+        }
+      ]
+    },
+    "remove": {
+      "template": "remove/monitoring_agent.sh.j2",
+      "steps": [
+        {
+          "name": "Stop agent",
+          "command": "echo 'Stopping agent...' && sleep 1"
+        },
+        {
+          "name": "Remove files",
+          "command": "rm -rf /opt/monitoring"
+        }
+      ]
+    }
+  },
+  "infra_agent_monitoring_agent_parameters": {
+    "parameters": [
+      {
+        "name": "license_key",
+        "description": "License key for the monitoring agent",
+        "type": "string",
+        "required": true
+      },
+      {
+        "name": "host",
+        "description": "Host to monitor",
+        "type": "string",
+        "required": true,
+        "default": "localhost"
+      }
+    ]
+  },
+  "infra_agent_monitoring_agent_verification": {
+    "verification": {
+      "steps": [
+        {
+          "name": "Check directory exists",
+          "command": "test -d /opt/monitoring"
+        },
+        {
+          "name": "Check config file",
+          "command": "test -f /opt/monitoring/config.yaml"
+        },
+        {
+          "name": "Verify configuration",
+          "command": "grep \"license_key: {{ parameters.license_key }}\" /opt/monitoring/config.yaml\ngrep \"host: {{ parameters.host }}\" /opt/monitoring/config.yaml "
+        }
+      ]
+    }
+  }
+}
