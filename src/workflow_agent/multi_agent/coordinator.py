@@ -26,37 +26,47 @@ class CoordinatorAgent:
     
     async def initialize(self) -> None:
         """Initialize and subscribe to relevant topics."""
+        logger.info("Initializing CoordinatorAgent...")
+        logger.debug("Subscribing to message bus topics...")
         await self.message_bus.subscribe("knowledge_retrieved", self._handle_knowledge_retrieved)
         await self.message_bus.subscribe("script_generated", self._handle_script_generated)
         await self.message_bus.subscribe("script_validated", self._handle_script_validated)
         await self.message_bus.subscribe("execution_complete", self._handle_execution_complete)
         await self.message_bus.subscribe("verification_complete", self._handle_verification_complete)
         await self.message_bus.subscribe("error", self._handle_error)
+        logger.info("CoordinatorAgent initialization complete")
     
     async def start_workflow(self, input_state: Dict[str, Any] | WorkflowState, config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Start a new workflow based on the input state."""
         workflow_id = str(uuid.uuid4())
+        logger.info("Starting new workflow with ID: %s", workflow_id)
         
         try:
             if isinstance(input_state, dict):
+                logger.debug("Converting input state dictionary to WorkflowState")
                 if "transaction_id" not in input_state:
                     input_state["transaction_id"] = workflow_id
                 state = WorkflowState(**input_state)
             else:
                 state = input_state
                 if not state.transaction_id:
-                    # Create a new state with the workflow_id as transaction_id
+                    logger.debug("Setting workflow_id as transaction_id in state")
                     state_dict = state.dict()
                     state_dict["transaction_id"] = workflow_id
                     state = WorkflowState(**state_dict)
                 
             if not state.system_context:
+                logger.debug("Adding system context to state")
                 state.system_context = get_system_context()
+            
+            logger.debug("Workflow state initialized: %s", state.dict())
+            
         except Exception as e:
-            logger.error(f"Invalid input state: {e}")
+            logger.error("Failed to initialize workflow state: %s", e, exc_info=True)
             return {"error": str(e), "workflow_id": workflow_id}
         
         async with self._lock:
+            logger.debug("Registering workflow %s in active workflows", workflow_id)
             self.active_workflows[workflow_id] = {
                 "state": state,
                 "config": config,
@@ -67,8 +77,11 @@ class CoordinatorAgent:
             self._workflow_events[workflow_id] = asyncio.Event()
         
         workflow_plan = self._create_workflow_plan(state)
+        logger.debug("Created workflow plan for %s: %s", workflow_id, workflow_plan)
         await self._execute_next_step(workflow_id, workflow_plan)
         
+        logger.info("Workflow %s started successfully for %s action on %s", 
+                    workflow_id, state.action, state.target_name)
         return {
             "status": "in_progress",
             "workflow_id": workflow_id,
@@ -211,14 +224,15 @@ class CoordinatorAgent:
         
         async with self._lock:
             if workflow_id not in self.active_workflows:
-                logger.error(f"Workflow {workflow_id} not found")
+                logger.error("Workflow %s not found in active workflows", workflow_id)
                 return
             workflow = self.active_workflows[workflow_id]
             if "state" in message:
+                logger.debug("Updating workflow state for %s", workflow_id)
                 workflow["state"] = WorkflowState(**message["state"])
             workflow_plan = self._create_workflow_plan(workflow["state"])
         
-        # Execute next step outside the lock
+        logger.debug("Executing next step for workflow %s", workflow_id)
         await self._execute_next_step(workflow_id, workflow_plan)
     
     async def _handle_execution_complete(self, message: Dict[str, Any]) -> None:
@@ -228,21 +242,24 @@ class CoordinatorAgent:
         
         async with self._lock:
             if workflow_id not in self.active_workflows:
-                logger.error(f"Workflow {workflow_id} not found")
+                logger.error("Workflow %s not found in active workflows", workflow_id)
                 return
             workflow = self.active_workflows[workflow_id]
             if "state" in message:
+                logger.debug("Updating workflow state for %s", workflow_id)
                 workflow["state"] = WorkflowState(**message["state"])
             if workflow["state"].error:
+                logger.error("Workflow %s failed: %s", workflow_id, workflow["state"].error)
                 workflow["status"] = "failed"
                 if workflow_id in self._workflow_events:
+                    logger.debug("Setting workflow event for failed workflow %s", workflow_id)
                     self._workflow_events[workflow_id].set()
                 should_execute_next = False
             else:
                 workflow_plan = self._create_workflow_plan(workflow["state"])
         
-        # Execute next step outside the lock if needed
         if should_execute_next:
+            logger.debug("Executing next step for workflow %s", workflow_id)
             await self._execute_next_step(workflow_id, workflow_plan)
     
     async def _handle_verification_complete(self, message: Dict[str, Any]) -> None:

@@ -63,11 +63,20 @@ class WorkflowConfiguration(BaseModel):
             raise ValueError(f"Invalid log level '{value}'. Must be one of: {valid_levels}")
         return value_upper
 
-    @validator("template_dir", "custom_template_dir", "plugin_dirs", "docs_cache_dir", each_item=True)
-    def convert_to_path(cls, value: Any) -> Optional[Path]:
-        """Convert path strings to Path objects."""
+    @validator("template_dir", "custom_template_dir", "docs_cache_dir")
+    def convert_single_path(cls, value: Any) -> Optional[Path]:
+        """Convert single path strings to Path objects."""
         if value is None:
             return None
+        if isinstance(value, str):
+            return Path(value).resolve()
+        if isinstance(value, Path):
+            return value.resolve()
+        raise ValueError(f"Invalid path value: {value}")
+
+    @validator("plugin_dirs", each_item=True)
+    def convert_path_list(cls, value: Any) -> Path:
+        """Convert path strings in lists to Path objects."""
         if isinstance(value, str):
             return Path(value).resolve()
         if isinstance(value, Path):

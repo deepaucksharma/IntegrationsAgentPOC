@@ -86,22 +86,33 @@ class WorkflowAgent:
         log_level = getattr(logging, self.config.log_level, logging.INFO)
         logging.basicConfig(
             level=log_level,
-            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+            format='%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s',
             handlers=[
                 logging.FileHandler("workflow_agent.log"),
                 logging.StreamHandler()
             ]
         )
+        logger.info("Logging configured with level: %s", self.config.log_level)
+        logger.debug("Full configuration: %s", self.config.__dict__)
 
     async def initialize(self) -> None:
         """Initialize components with connection pooling and retries."""
         try:
+            logger.info("Starting WorkflowAgent initialization...")
+            logger.debug("Initializing container with config: %s", self.config.__dict__)
             await self.container.initialize()
+            
+            logger.info("Validating container initialization...")
             self.container.validate_initialization()
+            
+            logger.info("Registering script generators...")
             self._register_script_generators()
-            logger.info("Workflow agent initialized with %d plugins", len(self.config.plugin_dirs))
+            
+            logger.info("WorkflowAgent initialization complete with %d plugins", len(self.config.plugin_dirs))
+            logger.debug("Plugin directories: %s", self.config.plugin_dirs)
         except InitializationError as e:
-            logger.error("Component initialization failed: %s", e)
+            logger.error("Component initialization failed: %s", e, exc_info=True)
+            logger.info("Cleaning up container due to initialization failure...")
             await self.container.cleanup()
             raise
 
@@ -185,20 +196,27 @@ class WorkflowAgent:
     async def _handle_execution_failure(self, state: WorkflowState) -> WorkflowState:
         """Handle execution failure and perform rollback if needed."""
         try:
-            logger.info(f"Initiating rollback for {state.target_name} due to: {state.error}")
+            logger.warning("Initiating rollback for %s due to: %s", state.target_name, state.error)
+            logger.debug("Current state before rollback: %s", state.dict())
+            
             recovery_manager = self.container.get('recovery_manager')
+            logger.info("Retrieved recovery manager, starting rollback process...")
+            
             rollback_result = await recovery_manager.perform_rollback(
                 state,
                 config={"configurable": self.config.__dict__}
             )
+            logger.debug("Rollback result: %s", rollback_result)
             
             if isinstance(rollback_result, dict) and rollback_result.get("error"):
+                logger.error("Rollback failed: %s", rollback_result['error'])
                 return state.add_warning(f"Rollback failed: {rollback_result['error']}")
             
+            logger.info("Rollback completed successfully for %s", state.target_name)
             return state.add_warning("Rollback completed successfully")
             
         except Exception as e:
-            logger.error(f"Failed to perform rollback: {e}")
+            logger.error("Failed to perform rollback: %s", e, exc_info=True)
             return state.add_warning(f"Failed to perform rollback: {str(e)}")
 
     def _prepare_execution_state(self, state: WorkflowState) -> WorkflowState:

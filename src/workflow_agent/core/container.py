@@ -9,7 +9,7 @@ from ..utils.resource_manager import ResourceManager
 from ..execution.executor import ScriptExecutor
 from ..scripting.generator import ScriptGenerator
 from ..scripting.validator import ScriptValidator
-from ..scripting.dynamic import DynamicScriptGenerator
+from ..scripting.dynamic_generator import DynamicScriptGenerator
 from ..verification.dynamic import DynamicVerificationBuilder
 from ..knowledge.integration import DynamicIntegrationKnowledge
 from ..strategy.installation import InstallationStrategyAgent

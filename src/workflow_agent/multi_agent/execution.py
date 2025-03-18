@@ -24,14 +24,22 @@ class ExecutionAgent:
     
     async def initialize(self) -> None:
         """Initialize the execution agent."""
+        logger.info("Initializing ExecutionAgent...")
+        logger.debug("Subscribing to message bus topics...")
         await self.message_bus.subscribe("execute_script", self._handle_execute_script)
         await self.message_bus.subscribe("verify_result", self._handle_verify_result)
+        logger.info("Initializing script executor...")
         await self.executor.initialize()
+        logger.info("ExecutionAgent initialization complete")
     
     async def cleanup(self) -> None:
         """Clean up resources."""
+        logger.info("Starting ExecutionAgent cleanup...")
+        logger.debug("Cleaning up script executor...")
         await self.executor.cleanup()
+        logger.debug("Cleaning up recovery manager...")
         await self.recovery.cleanup()
+        logger.info("ExecutionAgent cleanup complete")
     
     async def _handle_execute_script(self, message: Dict[str, Any]) -> None:
         workflow_id = message["workflow_id"]
@@ -39,35 +47,46 @@ class ExecutionAgent:
         config = message.get("config")
         try:
             state = WorkflowState(**state_dict)
-            logger.info(f"[ExecutionAgent] Executing script for {state.action} on {state.target_name}")
+            logger.info("[ExecutionAgent] Starting script execution for %s action on %s (workflow_id: %s)", 
+                       state.action, state.target_name, workflow_id)
+            logger.debug("[ExecutionAgent] Execution configuration: %s", config)
+            logger.debug("[ExecutionAgent] Initial state: %s", state.dict())
+            
             exec_result = await self.executor.run_script(state, config)
             if "error" in exec_result:
-                logger.error(f"[ExecutionAgent] Execution error: {exec_result['error']}")
+                logger.error("[ExecutionAgent] Execution error for %s: %s", state.target_name, exec_result["error"])
                 state.error = exec_result["error"]
-                logger.info(f"[ExecutionAgent] Attempting rollback for {state.target_name}")
+                logger.warning("[ExecutionAgent] Initiating rollback for %s due to execution error", state.target_name)
+                
                 rollback_result = await self.recovery.rollback_changes(state, config)
                 if "error" in rollback_result:
-                    logger.error(f"[ExecutionAgent] Rollback failed: {rollback_result['error']}")
+                    logger.error("[ExecutionAgent] Rollback failed for %s: %s", state.target_name, rollback_result["error"])
                     state.warnings.append(f"Rollback failed: {rollback_result['error']}")
                 else:
-                    logger.info(f"[ExecutionAgent] Rollback successful for {state.target_name}")
+                    logger.info("[ExecutionAgent] Rollback successful for %s", state.target_name)
+                
                 await self.message_bus.publish("execution_complete", {
                     "workflow_id": workflow_id,
                     "state": state.dict(),
                     "status": "failed"
                 })
+                logger.debug("[ExecutionAgent] Published execution failure for workflow %s", workflow_id)
                 return
             
             for key in ["output", "metrics", "changes", "legacy_changes", "transaction_id", "execution_id"]:
                 if key in exec_result:
+                    logger.debug("[ExecutionAgent] Setting %s in state: %s", key, exec_result[key])
                     setattr(state, key, exec_result[key])
             
-            logger.info(f"[ExecutionAgent] Script execution successful for {state.target_name}")
+            logger.info("[ExecutionAgent] Script execution successful for %s (workflow_id: %s)", state.target_name, workflow_id)
+            logger.debug("[ExecutionAgent] Final execution state: %s", state.dict())
+            
             await self.message_bus.publish("execution_complete", {
                 "workflow_id": workflow_id,
                 "state": state.dict(),
                 "status": "success"
             })
+            logger.debug("[ExecutionAgent] Published execution success for workflow %s", workflow_id)
         except Exception as e:
             logger.error(f"Error executing script: {e}")
             await self.message_bus.publish("error", {
