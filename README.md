@@ -2,38 +2,89 @@
 
 A Python framework for orchestrating multi-step workflows with AI-driven adaptation and self-improvement capabilities, featuring dynamic documentation-based integration.
 
-## Quick Start
+## Prerequisites
 
-```bash
-# Install the package
-git clone https://github.com/yourusername/workflow-agent.git
-cd workflow-agent
-pip install -e .
+Before installing, ensure you have:
 
-# Run a basic installation workflow
-workflow-agent install infra_agent --license-key=YOUR_LICENSE_KEY --host=YOUR_HOST
-```
+- **Python 3.8 or higher**
+  - Windows: [Download from python.org](https://www.python.org/downloads/windows/) and check "Add Python to PATH" during installation
+  - macOS: `brew install python@3.10` or download from python.org
+  - Linux: `sudo apt-get install python3 python3-pip python3-venv` (Ubuntu/Debian)
+
+- **pip and venv** (usually included with Python installation)
+
+- **Docker** (optional, for isolated execution)
 
 ## Installation
 
-### Prerequisites
-- Python 3.8 or higher
-- Docker (optional, for isolated execution)
+### Windows Setup
 
-### Installation Steps
-```bash
+```powershell
+# Verify Python is installed and in PATH
+python --version
+# Should display Python 3.8 or higher; if not, install from python.org
+
 # Clone the repository
 git clone https://github.com/yourusername/workflow-agent.git
 cd workflow-agent
 
+# Create and activate virtual environment
+python -m venv venv
+.\venv\Scripts\activate
+
 # Install the package and dependencies
 pip install -e .
-
-# Install optional dependencies
-pip install -e ".[llm]"  # For LLM integration
-pip install -e ".[dev]"  # For development tools
-pip install -e ".[doc]"  # For documentation tools
 ```
+
+### macOS/Linux Setup
+
+```bash
+# Verify Python is installed
+python3 --version
+# Should display Python 3.8 or higher
+
+# Clone the repository
+git clone https://github.com/yourusername/workflow-agent.git
+cd workflow-agent
+
+# Create and activate virtual environment
+python3 -m venv venv
+source venv/bin/activate
+
+# Install the package and dependencies
+pip install -e .
+```
+
+### Optional Dependencies
+
+```bash
+# For LLM integration
+pip install -e ".[llm]"
+
+# For development tools
+pip install -e ".[dev]"
+
+# For documentation tools
+pip install -e ".[doc]"
+```
+
+## First-Time Setup
+
+1. **Verify the installation**:
+   ```bash
+   # Check that workflow-agent is available
+   workflow-agent --help
+   ```
+
+2. **Create a basic configuration file**:
+   ```bash
+   # Create a minimal configuration without Docker
+   cp custom_config_no_docker.yaml workflow_config.yaml
+   ```
+
+3. **Verify permissions**:
+   - Windows: Run PowerShell as Administrator if necessary
+   - macOS/Linux: Ensure you have write access to the installation directory
 
 ## Usage
 
@@ -62,6 +113,8 @@ from workflow_agent.multi_agent.coordinator import CoordinatorAgent
 from workflow_agent.knowledge.integration import DynamicIntegrationKnowledge
 from workflow_agent.documentation.parser import DocumentationParser
 from workflow_agent.strategy.installation import InstallationStrategyAgent
+from workflow_agent.core.state import WorkflowState
+from workflow_agent.utils.system import get_system_context
 
 async def run_workflow():
     # Set up multi-agent system
@@ -75,9 +128,6 @@ async def run_workflow():
     strategy = InstallationStrategyAgent()
     
     # Define workflow state
-    from workflow_agent.core.state import WorkflowState
-    from workflow_agent.utils.system import get_system_context
-    
     state = WorkflowState(
         action="install",
         target_name="monitoring_agent",
@@ -108,188 +158,144 @@ async def run_workflow():
         print(f"Workflow failed: {e}")
 
 # Run the workflow
-asyncio.run(run_workflow())
+if __name__ == "__main__":
+    asyncio.run(run_workflow())
 ```
 
 ## Configuration
 
 Configuration is managed through YAML files. Default locations:
-- `./workflow_config.yaml`
-- `~/.workflow_agent/config.yaml`
+- `./workflow_config.yaml` (current directory)
+- `~/.workflow_agent/config.yaml` (user's home directory)
+
+### Basic Configuration (No Docker)
 
 ```yaml
 configurable:
   user_id: "test_user"
   template_dir: "./integrations/common_templates"
+  use_isolation: false
+  isolation_method: "direct"
+  execution_timeout: 300
+  skip_verification: false
+  log_level: "DEBUG"
+```
+
+### Full Configuration Options
+
+```yaml
+configurable:
+  user_id: "test_user"
+  template_dir: "./integrations/common_templates"
+  custom_template_dir: null
   use_isolation: true
-  isolation_method: "docker"  # or "direct"
-  execution_timeout: 30000
+  isolation_method: "docker"  # Options: "docker", "direct", "none"
+  execution_timeout: 30000    # In milliseconds
   skip_verification: false
   rule_based_optimization: true
   use_static_analysis: true
   db_connection_string: "workflow_history.db"
   prune_history_days: 90
+  plugin_dirs:
+    - "./plugins"
   max_concurrent_tasks: 5
   least_privilege_execution: true
-  log_level: "INFO"
+  log_level: "INFO"  # Options: "DEBUG", "INFO", "WARNING", "ERROR"
 ```
 
 ## Troubleshooting
 
-### Common Issues
+### Initial Setup Issues
 
-**1. No such file or directory errors**
+**Python not found or incorrect version**
+
+```
+Python was not found; run without arguments to install from the Microsoft Store
+```
+
+**Solution:** Install Python from python.org, check "Add Python to PATH", and restart your terminal.
+
+```bash
+# Verify Python is in PATH after installation
+python --version  # Windows
+python3 --version  # macOS/Linux
+```
+
+**Virtual environment activation issues**
+
+```
+Cannot activate venv: execution of scripts is disabled on this system
+```
+
+**Solution:** On Windows, run in PowerShell as Administrator:
+
+```powershell
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+```
+
+### Running Issues
+
+**Package not found**
+
+```
+ModuleNotFoundError: No module named 'workflow_agent'
+```
+
+**Solution:** 
+```bash
+# Make sure you're in the project directory
+cd workflow-agent
+
+# Verify venv is activated (you should see (venv) in your prompt)
+# If not, activate it:
+.\venv\Scripts\activate  # Windows
+source venv/bin/activate  # macOS/Linux
+
+# Install in development mode
+pip install -e .
+```
+
+**Template directory not found**
 
 ```
 Error: No such file or directory: './integrations/common_templates'
 ```
 
-**Solution:** Check that the template directory exists and is correctly referenced in your configuration.
+**Solution:** Create the template directory structure:
 
 ```bash
-# Create the template directory
-mkdir -p ./integrations/common_templates
+# Create required directories
+mkdir -p integrations/common_templates/install
+mkdir -p integrations/common_templates/remove
+mkdir -p integrations/common_templates/verify
+mkdir -p integrations/common_templates/macros
 
-# Or specify a custom template directory in config
-echo 'configurable:
-  template_dir: "/path/to/your/templates"' > workflow_config.yaml
+# Set the template directory in your config
+configurable:
+  template_dir: "./integrations/common_templates"
 ```
 
-**2. Docker isolation failures**
+**Docker isolation failures**
 
 ```
 Error: Docker not available, falling back to direct execution
 ```
 
-**Solution:** Ensure Docker is installed and running, or disable Docker isolation:
-
-```yaml
-# In workflow_config.yaml
-configurable:
-  use_isolation: false
-  isolation_method: "direct"
-```
-
-**3. Documentation parsing errors**
-
-```
-Error: Failed to fetch documentation for [integration_type]
-```
-
-**Solution:** Check your network connection and verify the integration type is correct. You can also provide local YAML definitions:
-
-1. Create directory: `src/workflow_agent/integrations/[integration_type]/[target_name]/`
-2. Add files: `definition.yaml`, `parameters.yaml`, and `verification.yaml`
-
-**4. Permission denied errors during script execution**
-
-```
-Error: Permission denied
-```
-
-**Solution:** The script may need elevated privileges. Use one of these approaches:
-
-```yaml
-# In workflow_config.yaml, enable least privilege execution
-configurable:
-  least_privilege_execution: true
-```
-
-**5. Timeouts during execution**
-
-```
-Error: Script execution timed out after [X]s
-```
-
-**Solution:** Increase the execution timeout in configuration:
-
-```yaml
-configurable:
-  execution_timeout: 60000  # 60 seconds (in milliseconds)
-```
-
-### Debugging
-
-To enable more detailed logging:
+**Solution:** Ensure Docker is installed and running, or use the no-Docker configuration:
 
 ```bash
-# Set environment variable
-export LOG_LEVEL=DEBUG
-
-# Or in configuration file
-configurable:
-  log_level: "DEBUG"
+# Copy the no-Docker configuration 
+cp custom_config_no_docker.yaml workflow_config.yaml
 ```
 
-Log files are stored in the current directory by default. To inspect execution history:
+### Diagnostic Commands
+
+**Check system compatibility**
 
 ```python
-import sqlite3
-
-# Connect to the history database
-conn = sqlite3.connect("workflow_history.db")
-conn.row_factory = sqlite3.Row
-cursor = conn.cursor()
-
-# Query recent executions
-cursor.execute("SELECT * FROM execution_history ORDER BY timestamp DESC LIMIT 5")
-for row in cursor.fetchall():
-    print(f"ID: {row['id']}, Status: {row['success']}, Error: {row['error_message']}")
-```
-
-## Advanced Troubleshooting
-
-### Generating Test Scripts
-
-You can generate a script without executing it:
-
-```python
-import asyncio
-from workflow_agent.scripting.dynamic_generator import DynamicScriptGenerator
-from workflow_agent.knowledge.integration import DynamicIntegrationKnowledge
-from workflow_agent.documentation.parser import DocumentationParser
-from workflow_agent.core.state import WorkflowState
-from workflow_agent.utils.system import get_system_context
-
-async def generate_test_script():
-    # Create a test state
-    state = WorkflowState(
-        action="install",
-        target_name="monitoring_agent",
-        integration_type="infra_agent",
-        parameters={"license_key": "test", "host": "test"},
-        system_context=get_system_context()
-    )
-    
-    # Fetch documentation and enhance state
-    doc_parser = DocumentationParser()
-    knowledge = DynamicIntegrationKnowledge(doc_parser)
-    state = await knowledge.enhance_workflow_state(state)
-    
-    # Generate script
-    generator = DynamicScriptGenerator()
-    result = await generator.generate_from_knowledge(state)
-    
-    if "script" in result:
-        with open("test_script.sh", "w") as f:
-            f.write(result["script"])
-        print("Script generated: test_script.sh")
-    else:
-        print(f"Error: {result.get('error')}")
-
-asyncio.run(generate_test_script())
-```
-
-### Checking System Integration
-
-Verify system resources and integration compatibility:
-
-```bash
-# Create a Python script to check system compatibility
-cat > check_system.py << EOF
+# Save as check_system.py
 import asyncio
 from workflow_agent.utils.system import get_system_context
-from workflow_agent.integrations.registry import IntegrationRegistry
 
 async def check_system():
     system_context = get_system_context()
@@ -297,18 +303,68 @@ async def check_system():
     print(f"- OS: {system_context['platform']['system']}")
     print(f"- Docker available: {system_context['docker_available']}")
     print(f"- Package managers: {', '.join([k for k, v in system_context['package_managers'].items() if v])}")
-    
-    print("\\nAvailable integrations:")
-    for integration_type in IntegrationRegistry._integrations:
-        targets = IntegrationRegistry.get_integrations_for_target(integration_type)
-        if targets:
-            print(f"- {integration_type}: {', '.join(targets)}")
 
-asyncio.run(check_system())
-EOF
+if __name__ == "__main__":
+    asyncio.run(check_system())
 
-# Run the check
-python check_system.py
+# Run with:
+# python check_system.py
 ```
 
-If all else fails, check the documentation at [https://github.com/yourusername/workflow-agent](https://github.com/yourusername/workflow-agent) or file an issue with your error logs attached.
+**Enable debug logging**
+
+```bash
+# Set environment variable before running
+set LOG_LEVEL=DEBUG  # Windows
+export LOG_LEVEL=DEBUG  # macOS/Linux
+
+# Or in config file
+configurable:
+  log_level: "DEBUG"
+```
+
+**Check execution history**
+
+```python
+# Save as view_history.py
+import sqlite3
+
+conn = sqlite3.connect("workflow_history.db")
+conn.row_factory = sqlite3.Row
+cursor = conn.cursor()
+
+cursor.execute("SELECT * FROM execution_history ORDER BY timestamp DESC LIMIT 5")
+for row in cursor.fetchall():
+    print(f"ID: {row['id']}, Action: {row['action']}, Success: {row['success']}, Error: {row['error_message']}")
+
+# Run with:
+# python view_history.py
+```
+
+## Example Workflows
+
+### Basic Installation Workflow
+
+```bash
+# Step 1: Create and activate virtual environment (if not already done)
+python -m venv venv
+.\venv\Scripts\activate  # Windows
+source venv/bin/activate  # macOS/Linux
+
+# Step 2: Install the package
+pip install -e .
+
+# Step 3: Create minimal configuration
+cp custom_config_no_docker.yaml workflow_config.yaml
+
+# Step 4: Run a test installation
+workflow-agent install infra_agent --license-key=test_key --host=localhost
+```
+
+### Running the Example Script
+
+```bash
+# Run the test workflow script
+cd examples
+python test_workflow.py
+```
