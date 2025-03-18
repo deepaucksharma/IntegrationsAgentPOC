@@ -15,6 +15,7 @@ src/workflow_agent/config/init.py
 src/workflow_agent/config/loader.py
 src/workflow_agent/config/templates.py
 src/workflow_agent/core/__init__.py
+src/workflow_agent/core/container.py
 src/workflow_agent/core/init.py
 src/workflow_agent/core/message_bus.py
 src/workflow_agent/core/state.py
@@ -31,6 +32,7 @@ src/workflow_agent/integrations/base.py
 src/workflow_agent/integrations/init.py
 src/workflow_agent/integrations/registry.py
 src/workflow_agent/knowledge/__init__.py
+src/workflow_agent/knowledge/enhancement.py
 src/workflow_agent/knowledge/integration.py
 src/workflow_agent/multi_agent/__init__.py
 src/workflow_agent/multi_agent/coordinator.py
@@ -55,6 +57,8 @@ src/workflow_agent/strategy/installation.py
 src/workflow_agent/utils/__init__.py
 src/workflow_agent/utils/init.py
 src/workflow_agent/utils/logging.py
+src/workflow_agent/utils/platform_manager.py
+src/workflow_agent/utils/resource_manager.py
 src/workflow_agent/utils/system.py
 src/workflow_agent/verification/__init__.py
 src/workflow_agent/verification/dynamic.py

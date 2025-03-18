@@ -22,6 +22,7 @@ class ErrorCode(Enum):
     NETWORK_ERROR = "NET_001"
     TEMPLATE_ERROR = "TMPL_001"
     SCRIPT_ERROR = "SCRPT_001"
+    DOCUMENTATION_ERROR = "DOC_001"
 
 @dataclass
 class ErrorContext:
@@ -120,6 +121,11 @@ class StateError(WorkflowError):
     def __init__(self, message: str, context: Optional[ErrorContext] = None, details: Optional[Dict[str, Any]] = None):
         super().__init__(message, ErrorCode.STATE_ERROR, context, details)
 
+class DatabaseError(WorkflowError):
+    """Raised when database operations fail."""
+    def __init__(self, message: str, context: Optional[ErrorContext] = None, details: Optional[Dict[str, Any]] = None):
+        super().__init__(message, ErrorCode.DATABASE_ERROR, context, details)
+
 class TemplateError(WorkflowError):
     """Raised when template operations fail."""
     def __init__(self, message: str, context: Optional[ErrorContext] = None, details: Optional[Dict[str, Any]] = None):
@@ -129,3 +135,12 @@ class ScriptError(WorkflowError):
     """Raised when script generation or validation fails."""
     def __init__(self, message: str, context: Optional[ErrorContext] = None, details: Optional[Dict[str, Any]] = None):
         super().__init__(message, ErrorCode.SCRIPT_ERROR, context, details)
+
+class DocumentationFetchError(WorkflowError):
+    """Raised when documentation fetching or parsing operations fail."""
+    def __init__(self, message: str, context: Optional[ErrorContext] = None, details: Optional[Dict[str, Any]] = None):
+        super().__init__(message, ErrorCode.DOCUMENTATION_ERROR, context, details)
+
+class InitializationError(Exception):
+    """Exception raised when initialization fails."""
+    pass

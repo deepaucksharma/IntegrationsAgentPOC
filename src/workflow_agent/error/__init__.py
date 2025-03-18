@@ -5,22 +5,30 @@ from .exceptions import (
     WorkflowError,
     ValidationError,
     ExecutionError,
-    DatabaseError,
     ConfigurationError,
     ResourceError,
     SecurityError,
     TimeoutError,
-    RollbackError
+    RollbackError,
+    DatabaseError,
+    PlatformError,
+    StateError,
+    TemplateError,
+    ScriptError
 )
 
 __all__ = [
     "WorkflowError",
     "ValidationError",
     "ExecutionError",
-    "DatabaseError",
     "ConfigurationError",
     "ResourceError",
     "SecurityError",
     "TimeoutError",
-    "RollbackError"
+    "RollbackError",
+    "DatabaseError",
+    "PlatformError",
+    "StateError",
+    "TemplateError",
+    "ScriptError"
 ]
