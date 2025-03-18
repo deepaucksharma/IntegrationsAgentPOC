@@ -1,7 +1,5 @@
 # Workflow Agent
 
-![image](https://github.com/user-attachments/assets/add4a13a-f250-4c5a-a1cd-e4f561b285ed)
-
 
 A Python framework for orchestrating multi-step workflows with AI-driven adaptation and self-improvement capabilities, featuring dynamic documentation-based integration.
 
@@ -75,6 +73,4 @@ workflow-agent install infra_agent --license-key=test123 --host=localhost
 
 See the [Developer Setup & Troubleshooting](developer-readme.md) guide for more detailed instructions.
 
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
+![image](https://github.com/user-attachments/assets/add4a13a-f250-4c5a-a1cd-e4f561b285ed)
