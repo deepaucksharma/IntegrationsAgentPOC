@@ -1,20 +1,4 @@
-# Workflow Agent
-
-
-A Python framework for orchestrating multi-step workflows with AI-driven adaptation and self-improvement capabilities, featuring dynamic documentation-based integration.
-
-## Introduction
-
-Workflow Agent is designed to simplify and automate the process of integrating infrastructure agents, monitoring tools, and other services across diverse environments. By combining a multi-agent architecture with dynamic documentation parsing, the framework can adapt to various platforms and generate optimal installation strategies automatically.
-
-## Key Features
-
-- **AI-Driven Adaptation**: Dynamically analyzes documentation to generate optimal installation scripts
-- **Self-Improvement**: Learns from failures and improves future execution strategies
-- **Multi-Agent Architecture**: Specialized agents coordinate for comprehensive workflow management
-- **Platform Awareness**: Detects and adapts to different operating systems and package managers
-- **Robust Error Handling**: Built-in recovery and rollback mechanisms for failed deployments
-- **Isolation Options**: Support for both direct and containerized (Docker) execution for security
+# Overview
 
 ## Documentation Contents
 
