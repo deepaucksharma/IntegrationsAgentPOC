@@ -34,11 +34,11 @@ def get_optimizer(name: str) -> Optional[Callable]:
 # Import and register built-in optimizers
 from .llm import llm_optimize
 from .shellcheck import shellcheck_optimize
-from .rule_based import rule_based_optimize
+from .rule_based import optimize_script
 
 # Register built-in optimizers
 register_optimizer("llm", llm_optimize)
 register_optimizer("shellcheck", shellcheck_optimize)
-register_optimizer("rule-based", rule_based_optimize)
+register_optimizer("rule-based", optimize_script)
 
 __all__ = ["register_optimizer", "get_optimizer"]

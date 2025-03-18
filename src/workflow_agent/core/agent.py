@@ -1,3 +1,4 @@
+"""Base agent definition for workflow execution."""
 import abc
 from typing import Any, Dict, List, Optional
 from dataclasses import dataclass

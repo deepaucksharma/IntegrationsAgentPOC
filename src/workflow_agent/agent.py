@@ -2,12 +2,17 @@ import logging
 import uuid
 import os
 from typing import Dict, Any, Optional, List
+from dataclasses import dataclass
+
+# Core imports
 from .core.agent import AbstractWorkflowAgent, AgentState, AgentResult, AgentConfig
+from .core.state import WorkflowState
+
+# Component imports
 from .workflow import WorkflowGraph, WorkflowExecutor
 from .config.configuration import ensure_workflow_config
 from .config.schemas import get_schema
 from .config.templates import reload_templates
-from .core.state import WorkflowState
 from .storage import HistoryManager
 from .scripting import ScriptGenerator, ScriptValidator
 from .execution import ScriptExecutor, ResourceLimiter
@@ -15,7 +20,11 @@ from .verification import Verifier
 from .rollback import RecoveryManager
 from .error.exceptions import WorkflowError, ValidationError, ExecutionError
 from .integrations.registry import IntegrationRegistry
-from dataclasses import dataclass
+
+# Lazy imports to avoid circular dependencies
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from .workflow_agent.nodes import validate_parameters
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +40,7 @@ class WorkflowAgentConfig:
     max_concurrent_tasks: int = 5
     use_isolation: bool = True
     isolation_method: str = "docker"
-    execution_timeout: int = 300000
+    execution_timeout: int = 300  # In seconds
     skip_verification: bool = False
     use_llm_optimization: bool = False
     rule_based_optimization: bool = True
@@ -68,7 +77,7 @@ class WorkflowAgent(AbstractWorkflowAgent):
         self.script_validator = self.workflow_config.script_validator or ScriptValidator()
         self.script_executor = self.workflow_config.script_executor or ScriptExecutor(
             self.history_manager, 
-            timeout=self.workflow_config.execution_timeout // 1000,  # Convert from ms to seconds
+            timeout=self.workflow_config.execution_timeout,  # Already in seconds
             max_concurrent=self.workflow_config.max_concurrent_tasks,
             resource_limiter=resource_limiter
         )
@@ -114,7 +123,7 @@ class WorkflowAgent(AbstractWorkflowAgent):
             "run_script", 
             self._run_script,
             retry_count=0,  # Don't retry script execution automatically
-            timeout=self.workflow_config.execution_timeout / 1000  # Convert to seconds
+            timeout=self.workflow_config.execution_timeout  # Already in seconds
         )
         
         graph.add_node(
@@ -142,8 +151,8 @@ class WorkflowAgent(AbstractWorkflowAgent):
         graph.add_transition("verify_result", [])  # End node
         graph.add_transition("rollback_changes", [])  # End node
         
-        # Define parallel execution groups for better performance
-        graph.add_parallel_group("validation", ["validate_parameters", "validate_script"])
+        # Remove parallel group since validation steps are sequential
+        # graph.add_parallel_group("validation", ["validate_parameters", "validate_script"])
         
         return graph
     
@@ -203,7 +212,16 @@ class WorkflowAgent(AbstractWorkflowAgent):
         """Invoke the workflow agent with improved error handling and validation."""
         try:
             workflow_config = ensure_workflow_config(config)
-            state_dict = dict(input_state)
+            
+            # Convert input state to dict if needed
+            if isinstance(input_state, dict):
+                state_dict = input_state
+            else:
+                try:
+                    state_dict = dict(input_state)
+                except (TypeError, ValueError) as e:
+                    logger.error(f"Failed to convert AgentState to dict: {e}")
+                    raise WorkflowError("Invalid input state format") from e
             
             logger.info(f"Invoking workflow agent for {state_dict.get('action', 'unknown')} on {state_dict.get('target_name', 'unknown')}")
             
@@ -233,41 +251,29 @@ class WorkflowAgent(AbstractWorkflowAgent):
                         if best_match:
                             integration_name, metadata = best_match
                             state_dict["integration_type"] = integration_name
-                            
-                            # Set category if not already set
-                            if "integration_category" not in state_dict or not state_dict["integration_category"]:
-                                state_dict["integration_category"] = metadata.category
-                            
-                            logger.info(f"Using integration {integration_name} for target {state_dict['target_name']}")
             
-            # Handle special commands
-            special_command = state_dict.get("special_command")
-            if special_command == "retrieve_docs":
-                return await self._handle_retrieve_docs(state_dict)
-            elif special_command == "dry_run":
-                return await self._handle_dry_run(state_dict, config)
+            # Create workflow state
+            workflow_state = WorkflowState(**state_dict)
             
-            # Auto-prune history if configured
-            if workflow_config.prune_history_days:
-                await self.history_manager.auto_prune_history(workflow_config.prune_history_days)
-            
-            # Execute full workflow
-            logger.info("Executing full workflow")
-            result = await self.workflow_executor.execute_workflow(state_dict, config)
-            
-            return {**result, "messages": input_state.get("messages", [])}
-            
-        except ValidationError as e:
-            logger.error(f"Validation error: {e}")
-            return {"error": str(e), "messages": input_state.get("messages", [])}
-        except ExecutionError as e:
-            logger.error(f"Execution error: {e}")
-            return {"error": str(e), "messages": input_state.get("messages", [])}
+            # Execute workflow
+            try:
+                result = await self.workflow_executor.execute_workflow(workflow_state, workflow_config)
+                return result
+            except Exception as e:
+                logger.error(f"Workflow execution failed: {e}")
+                return {
+                    "error": str(e),
+                    "action": workflow_state.action,
+                    "target_name": workflow_state.target_name
+                }
+                
         except Exception as e:
-            logger.exception("Unexpected error during workflow execution")
-            return {"error": f"Workflow execution failed: {str(e)}", "messages": input_state.get("messages", [])}
-        finally:
-            await self.cleanup()
+            logger.error(f"Agent invocation failed: {e}")
+            return {
+                "error": str(e),
+                "action": state_dict.get("action", "unknown") if "state_dict" in locals() else "unknown",
+                "target_name": state_dict.get("target_name", "unknown") if "state_dict" in locals() else "unknown"
+            }
     
     async def _handle_retrieve_docs(self, state_dict: Dict[str, Any]) -> Dict[str, Any]:
         """Handle documentation retrieval command."""
@@ -495,13 +501,35 @@ class WorkflowAgent(AbstractWorkflowAgent):
             raise RuntimeError(f"Agent initialization failed: {str(e)}") from e
     
     async def cleanup(self) -> None:
-        """Clean up resources."""
+        """Clean up resources and connections."""
         try:
-            await self.history_manager.close()
-            await self.script_executor.cleanup()
-            await self.recovery_manager.cleanup()
+            logger.info("Cleaning up WorkflowAgent resources")
+            
+            # Clean up history manager
+            if self.history_manager:
+                await self.history_manager.close()
+            
+            # Clean up script executor
+            if self.script_executor:
+                await self.script_executor.cleanup()
+            
+            # Clean up verifier
+            if self.verifier:
+                await self.verifier.cleanup()
+            
+            # Clean up recovery manager
+            if self.recovery_manager:
+                await self.recovery_manager.cleanup()
+            
+            # Clean up workflow executor
+            if self.workflow_executor:
+                await self.workflow_executor.cleanup()
+            
+            logger.info("WorkflowAgent cleanup completed successfully")
+            
         except Exception as e:
-            logger.error(f"Error during cleanup: {e}")
+            logger.error(f"Error during WorkflowAgent cleanup: {e}")
+            # Don't re-raise the exception as cleanup should be best-effort
 
 class WorkflowAgentFactory:
     """Factory class for creating workflow agents."""

@@ -5,7 +5,7 @@ import time
 import os
 import json
 from typing import Dict, Any, Optional, List
-from jinja2 import Template, Environment
+from jinja2 import Template, Environment, FileSystemLoader, TemplateNotFound
 from pathlib import Path
 from ..core.state import WorkflowState, Change
 from ..config.templates import get_template, render_template, get_template_categories
@@ -14,6 +14,7 @@ from ..utils.system import get_system_context
 from ..integrations import IntegrationHandler
 from .optimizers import get_optimizer
 from .template_helpers import compose_template
+from shlex import quote
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,59 @@ class ScriptGenerator:
         self.history_manager = history_manager or HistoryManager()
         self.integration_handler = IntegrationHandler()
         self.template_cache = {}  # Cache for rendered templates
+        self.env = None
+        self._initialize_env()
+    
+    def _initialize_env(self) -> None:
+        """Initialize Jinja2 environment with security settings."""
+        try:
+            template_dir = os.getenv("WORKFLOW_TEMPLATE_DIR", "templates")
+            if not os.path.exists(template_dir):
+                os.makedirs(template_dir)
+            
+            self.env = Environment(
+                loader=FileSystemLoader(template_dir),
+                autoescape=True,
+                trim_blocks=True,
+                lstrip_blocks=True
+            )
+            
+            # Add security filters
+            self.env.filters["shell_escape"] = quote
+            
+            logger.info(f"Template environment initialized with directory: {template_dir}")
+            
+        except Exception as e:
+            logger.error(f"Failed to initialize template environment: {e}")
+            raise
+    
+    def _sanitize_parameters(self, parameters: Dict[str, Any]) -> Dict[str, Any]:
+        """Sanitize parameters to prevent script injection."""
+        sanitized = {}
+        for key, value in parameters.items():
+            if isinstance(value, str):
+                sanitized[key] = quote(value)
+            elif isinstance(value, (list, tuple)):
+                sanitized[key] = [quote(str(item)) for item in value]
+            else:
+                sanitized[key] = value
+        return sanitized
+    
+    def _validate_template(self, template_name: str) -> bool:
+        """Validate that a template exists and is safe."""
+        try:
+            template = self.env.get_template(template_name)
+            # Basic security checks
+            if "{{" in template_name or "}}" in template_name:
+                logger.warning(f"Template name contains potentially unsafe characters: {template_name}")
+                return False
+            return True
+        except TemplateNotFound:
+            logger.error(f"Template not found: {template_name}")
+            return False
+        except Exception as e:
+            logger.error(f"Error validating template {template_name}: {e}")
+            return False
     
     async def generate_script(
         self,
@@ -66,9 +120,8 @@ class ScriptGenerator:
         template_key_used = None
         
         for key in template_keys:
-            template_content = get_template(key)
-            if template_content:
-                template_str = template_content
+            if self._validate_template(key):
+                template_str = get_template(key)
                 template_key_used = key
                 break
         
@@ -446,3 +499,69 @@ class ScriptGenerator:
             ))
         
         return changes
+
+    async def generate_script_from_template(self, 
+                                            template_name: str,
+                                            parameters: Dict[str, Any],
+                                            context: Optional[Dict[str, Any]] = None) -> Optional[str]:
+        """Generate a script from a template with sanitization."""
+        try:
+            # Validate template
+            if not self._validate_template(template_name):
+                return None
+            
+            # Sanitize parameters
+            safe_params = self._sanitize_parameters(parameters)
+            
+            # Prepare template context
+            template_context = {
+                "parameters": safe_params,
+                **(context or {})
+            }
+            
+            # Render template
+            template = self.env.get_template(template_name)
+            script = template.render(**template_context)
+            
+            # Basic script validation
+            if not script or not script.strip():
+                logger.error(f"Generated script is empty for template: {template_name}")
+                return None
+            
+            # Record generation in history
+            await self.history_manager.record_execution({
+                "transaction_id": context.get("transaction_id") if context else None,
+                "action": "generate_script",
+                "target_name": template_name,
+                "parameters": safe_params,
+                "result": {"success": True}
+            })
+            
+            return script
+            
+        except Exception as e:
+            logger.error(f"Failed to generate script from template {template_name}: {e}")
+            
+            # Record failure in history
+            if context and "transaction_id" in context:
+                await self.history_manager.record_execution({
+                    "transaction_id": context["transaction_id"],
+                    "action": "generate_script",
+                    "target_name": template_name,
+                    "parameters": parameters,
+                    "result": {
+                        "success": False,
+                        "error": str(e)
+                    }
+                })
+            
+            return None
+
+    def reload_templates(self) -> None:
+        """Reload templates from disk."""
+        try:
+            self._initialize_env()
+            logger.info("Templates reloaded successfully")
+        except Exception as e:
+            logger.error(f"Failed to reload templates: {e}")
+            raise

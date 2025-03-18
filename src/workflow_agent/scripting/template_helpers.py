@@ -1,4 +1,6 @@
 import os
+import re
+import shlex
 import logging
 from typing import Dict, Any, List, Optional
 from pathlib import Path
@@ -63,38 +65,112 @@ def create_fragment_environment(template_dirs: List[str]) -> Environment:
     
     return env
 
+def sanitize_input(value: Any) -> str:
+    """
+    Sanitize input for shell scripts.
+    
+    Args:
+        value: Value to sanitize
+        
+    Returns:
+        Sanitized string
+    """
+    if value is None:
+        return ""
+    
+    # Convert to string and escape shell special characters
+    return shlex.quote(str(value))
+
 def compose_template(
     base_template: str,
     fragments: Dict[str, str],
-    template_dirs: List[str]
+    context: Dict[str, Any]
 ) -> str:
     """
-    Compose a template from a base template and fragments.
+    Compose a template from base template and fragments.
     
     Args:
-        base_template: Base template content
-        fragments: Dict of fragment names to include
-        template_dirs: List of template directories
-    
+        base_template: Base template string
+        fragments: Dictionary of fragment names to templates
+        context: Rendering context
+        
     Returns:
         Composed template string
     """
-    # Create a Jinja2 environment for fragments
-    env = create_fragment_environment(template_dirs)
+    # Create environment with fragment loader
+    env = Environment()
     
-    # Load and preprocess fragments
-    processed_fragments = {}
+    # Add custom filters
+    env.filters['quote'] = sanitize_input
     
-    for key, fragment_name in fragments.items():
-        fragment_content = load_template_fragment(fragment_name, template_dirs)
-        if fragment_content:
-            processed_fragments[key] = fragment_content
+    # Add fragments as templates
+    fragment_templates = {}
+    for name, content in fragments.items():
+        fragment_templates[name] = env.from_string(content)
     
-    # Prepare special rendering context with fragments
-    context = {
-        "fragments": processed_fragments
-    }
+    # Create template function to render fragments
+    def render_fragment(name: str, **kwargs):
+        if name not in fragment_templates:
+            return f"<!-- Fragment {name} not found -->"
+        
+        # Merge context with kwargs
+        merged_context = {**context, **kwargs}
+        return fragment_templates[name].render(**merged_context)
     
-    # Render base template with fragments
-    template = Template(base_template, env)
-    return template.render(**context) 
+    # Add render_fragment to context
+    context['render_fragment'] = render_fragment
+    
+    # Create and render the base template
+    template = env.from_string(base_template)
+    return template.render(**context)
+
+def extract_placeholder_variables(template_str: str) -> List[str]:
+    """
+    Extract variables from a template string.
+    
+    Args:
+        template_str: Template string to analyze
+        
+    Returns:
+        List of variable names
+    """
+    # Find all Jinja2 variables ({{ variable }})
+    pattern = r'{{\s*([a-zA-Z0-9_\.]+)\s*}}'
+    matches = re.findall(pattern, template_str)
+    
+    # Find all Jinja2 conditionals and loops ({% if variable %}, {% for x in variable %})
+    pattern2 = r'{%\s*(?:if|for\s+\w+\s+in)\s+([a-zA-Z0-9_\.]+)\s*%}'
+    matches2 = re.findall(pattern2, template_str)
+    
+    # Combine and filter out duplicates
+    variables = list(set(matches + matches2))
+    
+    # Handle dotted notation (parameters.host -> parameters)
+    root_vars = set()
+    for var in variables:
+        if '.' in var:
+            root_vars.add(var.split('.')[0])
+        else:
+            root_vars.add(var)
+    
+    return sorted(list(root_vars))
+
+def validate_template_variables(template_str: str, context: Dict[str, Any]) -> List[str]:
+    """
+    Validate that all required variables are in the context.
+    
+    Args:
+        template_str: Template string to validate
+        context: Context dictionary
+        
+    Returns:
+        List of missing variables
+    """
+    variables = extract_placeholder_variables(template_str)
+    missing = []
+    
+    for var in variables:
+        if var not in context:
+            missing.append(var)
+    
+    return missing 

@@ -9,7 +9,7 @@ import json
 logger = logging.getLogger(__name__)
 
 # Valid isolation methods
-VALID_ISOLATION_METHODS = {"docker", "chroot", "venv", "none"}
+VALID_ISOLATION_METHODS = {"docker", "chroot", "venv", "direct", "none"}
 
 class WorkflowConfiguration(BaseModel):
     """Configuration for the workflow agent."""
@@ -27,6 +27,7 @@ class WorkflowConfiguration(BaseModel):
     rule_based_optimization: bool = False  # Added: alternative to LLM optimization
     use_static_analysis: bool = False  # Added: for script validation
     db_connection_string: Optional[str] = None  # Added: for database scaling
+    db_type: str = "sqlite"
     prune_history_days: Optional[int] = None  # Added: for history management
     plugin_dirs: List[str] = Field(default_factory=lambda: ["./plugins"])  # Added: for plugin architecture
     async_execution: bool = False  # Added: for concurrent execution
@@ -34,6 +35,8 @@ class WorkflowConfiguration(BaseModel):
     least_privilege_execution: bool = True  # Added: for security
     sandbox_isolation: bool = False  # Added: for stronger isolation
     log_level: str = "INFO"
+    enable_telemetry: bool = False
+    enable_metrics: bool = True
     
     @validator('isolation_method')
     def validate_isolation_method(cls, v):
@@ -68,12 +71,16 @@ def ensure_workflow_config(config: Optional[Dict[str, Any]] = None) -> WorkflowC
         config = {}
     
     try:
+        # If config is already a WorkflowConfiguration, return it
+        if isinstance(config, WorkflowConfiguration):
+            return config
+        
         # Handle nested config structure
-        if "configurable" in config:
+        if isinstance(config, dict) and "configurable" in config:
             config = config["configurable"]
         
         # Validate isolation settings
-        if config.get("use_isolation", True):
+        if isinstance(config, dict) and config.get("use_isolation", True):
             isolation_method = config.get("isolation_method")
             if not isolation_method:
                 if config.get("enforce_isolation", False):
@@ -99,9 +106,8 @@ def ensure_workflow_config(config: Optional[Dict[str, Any]] = None) -> WorkflowC
 
 # Global verification commands for supported targets/actions.
 verification_commands: Dict[str, str] = {
-    # Example: key "postgres-verify" can include a shell command template.
-    "postgres-verify": "psql -h {{ parameters.db_host }} -p {{ parameters.db_port }} -c '\\l'",
-    "mysql-verify": "mysql -h {{ parameters.db_host }} -P {{ parameters.db_port }} -e 'SHOW DATABASES;'"
+    "postgres-verify": "psql -h {{ parameters.db_host }} -p {{ parameters.db_port }} -c '\\l' > /dev/null 2>&1 && echo 'PostgreSQL connection successful'",
+    "mysql-verify": "mysql -h {{ parameters.db_host }} -P {{ parameters.db_port }} -e 'SHOW DATABASES;' > /dev/null 2>&1 && echo 'MySQL connection successful'"
 }
 
 # Function to load verification commands from external files

@@ -1,7 +1,9 @@
+"""Core state definitions for workflow execution."""
 from typing import Any, Dict, List, Optional, Union
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 class ParameterSpec(BaseModel):
+    """Specification for a parameter."""
     type: str
     description: Optional[str] = None
     required: bool = False
@@ -12,7 +14,17 @@ class ParameterSpec(BaseModel):
         extra = "allow"  # Allow extra fields for extensibility
 
 class ParameterSchema(BaseModel):
-    parameters: Dict[str, ParameterSpec] = Field(..., alias="__root__")
+    """Schema for parameters."""
+    __root__: Dict[str, ParameterSpec]
+
+    def __iter__(self):
+        return iter(self.__root__)
+    
+    def __getitem__(self, item):
+        return self.__root__[item]
+    
+    def get(self, key, default=None):
+        return self.__root__.get(key, default)
 
 class ExecutionMetrics(BaseModel):
     """Metrics collected during script execution."""
@@ -45,6 +57,7 @@ class Change(BaseModel):
     revert_command: Optional[str] = None  # Command to revert this specific change
 
 class WorkflowState(BaseModel):
+    """State model for workflow execution."""
     # Required fields from input
     action: str
     target_name: str
@@ -86,3 +99,7 @@ class WorkflowState(BaseModel):
         """Configuration for the model."""
         arbitrary_types_allowed = True
         extra = "allow"  # Allow extra fields for future extensions
+    
+    def dict(self, *args, **kwargs):
+        """Convert to dictionary with special handling for Pydantic v2."""
+        return self.model_dump(*args, **kwargs)

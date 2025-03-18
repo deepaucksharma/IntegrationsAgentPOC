@@ -231,8 +231,8 @@ class IntegrationRegistry:
             # Prefer integrations with more specific target lists
             score += (10 - min(10, len(metadata.targets)))
             
-            # Prefer infra_agent for backward compatibility
-            if name == "infra_agent":
+            # Prefer integrations with more specific target lists
+            if name == "workflow_agent":
                 score += 5
             
             scored_integrations.append((score, name, metadata))

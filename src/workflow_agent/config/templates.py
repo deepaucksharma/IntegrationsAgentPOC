@@ -1,3 +1,4 @@
+"""Template management for workflow agent."""
 import logging
 import os
 import json
@@ -9,13 +10,20 @@ from .configuration import ensure_workflow_config
 logger = logging.getLogger(__name__)
 
 # Global template environment
-template_env = None
+template_env: Optional[Environment] = None
 # Global template cache
 script_templates: Dict[str, str] = {}
 # Integration categories
 INTEGRATION_CATEGORIES = [
-    "aws", "azure", "gcp", "database", "webserver", "monitoring", 
-    "container", "network", "security", "custom"
+    "infra_agent",
+    "database",
+    "monitoring",
+    "security",
+    "network",
+    "storage",
+    "container",
+    "cloud",
+    "custom"
 ]
 
 def initialize_template_environment(template_dirs: List[str]) -> Environment:
@@ -60,14 +68,14 @@ def get_template_paths(base_dir: str) -> Dict[str, List[Path]]:
         return result
     
     # Process templates in the root templates directory (uncategorized)
-    for file_path in base_path.glob("*.j2"):
+    for file_path in base_path.glob("*.sh"):
         result["uncategorized"].append(file_path)
     
     # Process templates in category subdirectories
     for category in INTEGRATION_CATEGORIES:
         category_dir = base_path / category
         if category_dir.exists() and category_dir.is_dir():
-            for file_path in category_dir.glob("**/*.j2"):
+            for file_path in category_dir.glob("**/*.sh"):
                 result[category].append(file_path)
     
     return result
@@ -76,83 +84,61 @@ def load_templates(refresh: bool = False) -> Dict[str, str]:
     """
     Load script templates from template directories.
     
-    Checks both the default template directory and user-defined custom directory.
-    Organizes templates by category.
-    
     Args:
-        refresh: Whether to force a refresh of all templates
-    
+        refresh: Whether to force reload templates
+        
     Returns:
-        Dictionary mapping template keys to template content
+        Dictionary of template key to content
     """
-    global script_templates
+    global script_templates, template_env
     
-    # Skip if templates are already loaded and refresh is not requested
     if script_templates and not refresh:
         return script_templates
     
-    templates = {}
+    script_templates = {}
     
-    # Default templates (these are hardcoded fallbacks)
-    templates.update({
-        "default-install": """#!/usr/bin/env bash
-set -e
-echo "Installing {{ target_name }} with action {{ action }}"
-# Add your installation commands here.
-""",
-        "default-rollback": """#!/usr/bin/env bash
-set -e
-echo "Rolling back {{ target_name }} changes"
-# Add your rollback commands here.
-"""
-    })
+    # Get template directories from configuration
+    template_dirs = ["templates"]  # Default directory
+    custom_dirs = ["custom_templates"]  # Custom templates directory
     
-    # Load from template directories
-    config = ensure_workflow_config()
-    dirs_to_check = [config.template_dir]
+    # Create Jinja2 environment
+    search_paths = []
+    for base_dir in template_dirs + custom_dirs:
+        if os.path.exists(base_dir):
+            search_paths.append(base_dir)
     
-    if config.custom_template_dir:
-        dirs_to_check.append(config.custom_template_dir)
-    
-    # Initialize Jinja2 environment
-    if not template_env:
-        initialize_template_environment(dirs_to_check)
+    if search_paths:
+        template_env = Environment(
+            loader=FileSystemLoader(search_paths),
+            autoescape=False,
+            trim_blocks=True,
+            lstrip_blocks=True
+        )
     
     # Load templates from each directory
-    for template_dir in dirs_to_check:
-        if not os.path.exists(template_dir):
+    for base_dir in template_dirs + custom_dirs:
+        if not os.path.exists(base_dir):
             continue
         
-        # Get templates by category
-        template_paths = get_template_paths(template_dir)
-        
-        # Process templates in each category
-        for category, paths in template_paths.items():
-            for file_path in paths:
-                try:
-                    # Determine template key based on path
-                    # For categorized templates: category/target-action
-                    # For uncategorized: target-action
-                    rel_path = file_path.relative_to(Path(template_dir))
-                    template_name = str(rel_path).replace('.j2', '')
-                    
-                    # For root templates, get the key directly
-                    if category == "uncategorized":
-                        key = file_path.stem.replace(".sh", "")
+        for root, _, files in os.walk(base_dir):
+            for file in files:
+                if file.endswith(('.sh', '.bash', '.yaml', '.yml')):
+                    # Get relative path for template key
+                    rel_path = os.path.relpath(root, base_dir)
+                    if rel_path == ".":
+                        key = file
                     else:
-                        # For categorized templates, include category in key
-                        key = f"{category}/{file_path.stem.replace('.sh', '')}"
+                        key = f"{rel_path}/{file}"
                     
-                    with open(file_path, "r") as f:
-                        templates[key] = f.read()
-                        
-                    logger.debug(f"Loaded template: {key} from {file_path}")
-                except Exception as e:
-                    logger.error(f"Error loading template {file_path}: {e}")
+                    # Load template content
+                    try:
+                        with open(os.path.join(root, file), 'r') as f:
+                            script_templates[key] = f.read()
+                    except Exception as e:
+                        logger.error(f"Error loading template {key}: {e}")
     
-    script_templates = templates
-    logger.info(f"Loaded {len(templates)} templates")
-    return templates
+    logger.info(f"Loaded {len(script_templates)} templates")
+    return script_templates
 
 def get_template(key: str) -> Optional[str]:
     """

@@ -30,6 +30,15 @@ class Verifier:
         """Initialize the verifier."""
         self.verification_history = {}
     
+    async def cleanup(self) -> None:
+        """Clean up verification resources."""
+        try:
+            self.verification_history.clear()
+            logger.info("Verification resources cleaned up")
+        except Exception as e:
+            logger.error(f"Error during verification cleanup: {e}")
+            # Don't re-raise as cleanup should be best-effort
+    
     async def verify_result(
         self,
         state: WorkflowState,

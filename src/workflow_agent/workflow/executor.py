@@ -28,6 +28,16 @@ class WorkflowExecutor:
         self.default_config = default_config or {}
         self.max_concurrent_tasks = max_concurrent_tasks
     
+    async def cleanup(self) -> None:
+        """Clean up workflow executor resources."""
+        try:
+            if hasattr(self.graph, 'cleanup'):
+                await self.graph.cleanup()
+            logger.info("WorkflowExecutor resources cleaned up")
+        except Exception as e:
+            logger.error(f"Error during WorkflowExecutor cleanup: {e}")
+            # Don't re-raise as cleanup should be best-effort
+    
     async def execute_workflow(
         self,
         state: Dict[str, Any],
@@ -43,34 +53,25 @@ class WorkflowExecutor:
         Returns:
             Updated workflow state as a dictionary
         """
-        # Merge with default configuration
-        merged_config = self.default_config.copy()
-        if config:
-            for key, value in config.items():
-                if key in merged_config and isinstance(merged_config[key], dict) and isinstance(value, dict):
-                    merged_config[key].update(value)
-                else:
-                    merged_config[key] = value
-        
-        # Get workflow configuration
-        workflow_config = ensure_workflow_config(merged_config)
-        
-        # Convert state dict to WorkflowState
-        workflow_state = WorkflowState(**state)
-        
-        # Determine nodes to skip based on configuration
-        skip_nodes = []
-        if config and "configurable" in config:
-            skip_verify = config["configurable"].get("skip_verification", False)
-            if skip_verify and workflow_state.action in ["remove", "uninstall"]:
-                skip_nodes.append("verify_result")
-                logger.info("Skipping verification for removal/uninstall action (configured)")
-        
-        # Execute workflow
         try:
+            # Convert state dict to WorkflowState if it's not already
+            workflow_state = state if isinstance(state, WorkflowState) else WorkflowState(**state)
+            
+            # Get workflow configuration
+            workflow_config = ensure_workflow_config(config)
+            
+            # Determine nodes to skip based on configuration
+            skip_nodes = []
+            if config and "configurable" in config:
+                skip_verify = config["configurable"].get("skip_verification", False)
+                if skip_verify and workflow_state.action in ["remove", "uninstall"]:
+                    skip_nodes.append("verify_result")
+                    logger.info("Skipping verification for removal/uninstall action (configured)")
+            
+            # Execute workflow
             result_state = await self.graph.execute(
                 state=workflow_state,
-                config=merged_config,
+                config=workflow_config.dict(),  # Convert Pydantic model to dict
                 async_execution=workflow_config.async_execution,
                 skip_nodes=skip_nodes
             )
@@ -81,6 +82,6 @@ class WorkflowExecutor:
             logger.exception(f"Error executing workflow: {e}")
             return {
                 "error": f"Workflow execution failed: {str(e)}",
-                "action": workflow_state.action,
-                "target_name": workflow_state.target_name
+                "action": workflow_state.action if 'workflow_state' in locals() else state.get("action", "unknown"),
+                "target_name": workflow_state.target_name if 'workflow_state' in locals() else state.get("target_name", "unknown")
             }

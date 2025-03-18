@@ -390,3 +390,66 @@ def get_targets(category: Optional[str] = None) -> List[str]:
 def clear_schema_cache() -> None:
     """Clear the schema model cache."""
     _schema_model_cache.clear()
+
+def _determine_category(target_name: str, integration_type: str) -> str:
+    """
+    Determine the category for an integration.
+    
+    Args:
+        target_name: Target name
+        integration_type: Integration type
+        
+    Returns:
+        Category name
+    """
+    # Target names mapped to categories
+    target_to_category = {
+        # Databases
+        "postgres": "database",
+        "mysql": "database",
+        "mongodb": "database",
+        "redis": "database",
+        
+        # Web servers
+        "nginx": "webserver",
+        "apache": "webserver",
+        
+        # AWS services
+        "aws": "aws",
+        "ec2": "aws",
+        "rds": "aws",
+        
+        # Azure services
+        "azure": "azure",
+        
+        # GCP services
+        "gcp": "gcp",
+        
+        # Containers
+        "docker": "container",
+        "kubernetes": "container",
+        
+        # Monitoring
+        "monitoring_agent": "monitoring"
+    }
+    
+    # Integration types mapped to categories
+    integration_to_category = {
+        "aws": "aws",
+        "azure": "azure",
+        "gcp": "gcp",
+        "database": "database",
+        "webserver": "webserver",
+        "infra_agent": "monitoring"
+    }
+    
+    # First check integration type mapping
+    if integration_type in integration_to_category:
+        return integration_to_category[integration_type]
+    
+    # Then check target name mapping
+    if target_name in target_to_category:
+        return target_to_category[target_name]
+    
+    # Default to custom category
+    return "custom"

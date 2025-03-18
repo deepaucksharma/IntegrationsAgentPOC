@@ -6,7 +6,8 @@ import socket
 import logging
 import json
 import urllib.request
-from typing import Dict, Any, Optional
+import subprocess
+from typing import Dict, Any, Optional, List
 import psutil
 
 logger = logging.getLogger(__name__)
@@ -177,3 +178,51 @@ def _detect_cloud_provider() -> Optional[Dict[str, Any]]:
         pass
     
     return None
+
+def execute_command(
+    command: List[str], 
+    timeout: Optional[int] = None,
+    capture_output: bool = True
+) -> Dict[str, Any]:
+    """
+    Execute a system command safely.
+    
+    Args:
+        command: Command list to execute
+        timeout: Optional timeout in seconds
+        capture_output: Whether to capture stdout/stderr
+    
+    Returns:
+        Dictionary with command execution results
+    """
+    try:
+        result = subprocess.run(
+            command,
+            timeout=timeout,
+            capture_output=capture_output,
+            text=True,
+            check=False
+        )
+        
+        return {
+            "success": result.returncode == 0,
+            "return_code": result.returncode,
+            "stdout": result.stdout if capture_output else "",
+            "stderr": result.stderr if capture_output else "",
+            "command": " ".join(command)
+        }
+    except subprocess.TimeoutExpired:
+        return {
+            "success": False,
+            "timeout": True,
+            "return_code": None,
+            "command": " ".join(command),
+            "error": f"Command timeout after {timeout}s"
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "return_code": None,
+            "command": " ".join(command),
+            "error": str(e)
+        }

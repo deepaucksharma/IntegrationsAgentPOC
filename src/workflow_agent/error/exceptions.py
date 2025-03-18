@@ -34,4 +34,4 @@ class TimeoutError(WorkflowError):
 
 class RollbackError(WorkflowError):
     """Raised when rollback operations fail."""
-    pass 
+    pass

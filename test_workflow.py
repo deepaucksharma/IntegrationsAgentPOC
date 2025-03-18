@@ -20,7 +20,9 @@ async def test_install_monitoring_agent():
         "integration_type": "infra_agent",
         "parameters": {
             "api_key": "test_api_key",
-            "endpoint": "https://monitoring.example.com"
+            "endpoint": "https://monitoring.example.com",
+            "db_host": "localhost",
+            "db_port": "5432"
         }
     }
     
