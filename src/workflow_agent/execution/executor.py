@@ -10,10 +10,14 @@ import logging
 import shutil
 import sys
 from typing import Dict, Any, Optional, Tuple
+from datetime import datetime
 
 from ..core.state import WorkflowState, OutputData, ExecutionMetrics, Change
 from ..config.configuration import ensure_workflow_config
 from .isolation import run_script_direct, run_script_docker
+from ..utils.platform_manager import PlatformManager
+from ..utils.resource_manager import ResourceManager
+from ..error.exceptions import ExecutionError, ResourceError, TimeoutError
 
 logger = logging.getLogger(__name__)
 
@@ -75,178 +79,167 @@ class ScriptExecutor:
     """Execute scripts with isolation and resource management."""
     
     def __init__(
-        self, 
-        history_manager=None, 
-        timeout: int = 300,
-        max_concurrent: int = 10,
-        resource_limiter=None
+        self,
+        platform_manager: Optional[PlatformManager] = None,
+        resource_manager: Optional[ResourceManager] = None,
+        timeout: int = 300
     ):
-        self.history_manager = history_manager
+        self.platform_manager = platform_manager or PlatformManager()
+        self.resource_manager = resource_manager or ResourceManager()
         self.timeout = timeout
-        self.resource_limiter = resource_limiter or ResourceLimiter(max_concurrent=max_concurrent)
-    
-    async def initialize(self, config: Optional[Dict[str, Any]] = None) -> None:
+
+    async def initialize(self) -> None:
         """Initialize the executor."""
-        pass
-    
+        await self.resource_manager.initialize()
+
     async def cleanup(self) -> None:
         """Clean up executor resources."""
-        pass
-    
+        await self.resource_manager.cleanup()
+
     async def run_script(
         self,
         state: WorkflowState,
         config: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
-        """Execute a script with optional isolation."""
+    ) -> WorkflowState:
+        """Execute a script with proper resource management."""
         if not state.script:
-            return {"error": "No script to run."}
-        
-        workflow_config = ensure_workflow_config(config or {})
-        temp_dir = tempfile.mkdtemp(prefix='workflow-')
-        script_id = str(uuid.uuid4())
-        
-        # Use appropriate file extension based on platform
-        is_windows = sys.platform.lower() == "win32"
-        script_ext = ".ps1" if is_windows else ".sh"
-        script_path = os.path.join(temp_dir, f"script-{script_id}{script_ext}")
-        
-        transaction_id = state.transaction_id or str(uuid.uuid4())
+            return state.set_error("No script to execute")
+
+        # Create execution context
         execution_id = str(uuid.uuid4())
+        metrics = ExecutionMetrics(start_time=datetime.utcnow())
         
         try:
-            await self.resource_limiter.acquire(execution_id)
-            try:
-                with open(script_path, 'w', newline='\n') as f:
-                    f.write(state.script)
-                os.chmod(script_path, 0o755)
-            except IOError as e:
-                return {"error": f"Failed to create script file: {e}"}
-            
-            start_time = time.time()
-            isolation_method = state.isolation_method or workflow_config.isolation_method
-            use_isolation = workflow_config.use_isolation
-            
-            if use_isolation and isolation_method == "docker":
-                logger.info(f"Running script with Docker isolation for {state.target_name} {state.action}")
-                result = await run_script_docker(
-                    script_path,
-                    workflow_config.execution_timeout,
-                    workflow_config.least_privilege_execution
-                )
-            else:
-                logger.info(f"Running script directly for {state.target_name} {state.action}")
-                if is_windows:
-                    result = await run_script_direct_windows(script_path, workflow_config.execution_timeout)
-                else:
-                    result = await run_script_direct(script_path, workflow_config.execution_timeout)
-            
-            success, stdout_str, stderr_str, exit_code, error_message = result
-            end_time = time.time()
-            execution_time = int((end_time - start_time) * 1000)
-            
-            metrics = ExecutionMetrics(
-                start_time=start_time,
-                end_time=end_time,
-                execution_time=execution_time
-            )
-            output = OutputData(stdout=stdout_str, stderr=stderr_str, exit_code=exit_code)
-            changes = state.changes.copy() if state.changes else []
-            
-            if success:
-                # Optional: parse stdout for changes
-                for line in stdout_str.lower().split('\n'):
-                    if "installed package" in line:
-                        changes.append(Change(
-                            type="install",
-                            target="package",
-                            details="Installed package from script",
-                            revertible=True
-                        ))
-                    if "created file" in line:
-                        changes.append(Change(
-                            type="create",
-                            target="file",
-                            details="Created file from script",
-                            revertible=True
-                        ))
+            # Create temporary directory for script
+            async with self.resource_manager.temp_directory(prefix=f"workflow-{execution_id}-") as temp_dir:
+                # Get appropriate script extension
+                script_ext = self.platform_manager.get_script_extension()
+                script_path = os.path.join(temp_dir, f"script{script_ext}")
                 
-                # If no changes detected, add a default one
-                if not changes:
-                    if state.action in ["install", "setup"]:
-                        changes.append(Change(
-                            type="install",
-                            target=state.target_name,
-                            details=f"Installed {state.target_name}",
-                            revertible=True
-                        ))
-                    elif state.action == "verify":
-                        changes.append(Change(
-                            type="verify",
-                            target=state.target_name,
-                            details=f"Verified {state.target_name}",
-                            revertible=False
-                        ))
-                    elif state.action in ["remove", "uninstall"]:
-                        changes.append(Change(
-                            type="remove",
-                            target=state.target_name,
-                            details=f"Removed {state.target_name}",
-                            revertible=False
-                        ))
-            
-            # Save to history if there's a history manager
-            try:
-                if self.history_manager:
-                    record_id = await self.history_manager.save_execution(
-                        target_name=state.target_name,
-                        action=state.action,
-                        success=success,
-                        execution_time=execution_time,
-                        error_message=None if success else error_message,
-                        script=state.script,
-                        output={"stdout": stdout_str, "stderr": stderr_str, "exit_code": exit_code},
-                        parameters=state.parameters,
-                        transaction_id=transaction_id,
-                        user_id=workflow_config.user_id
-                    )
-                    execution_id = record_id
-            except Exception as e:
-                logger.error(f"Failed to save execution history: {e}")
-                execution_id = None
-            
-            if success:
-                return {
-                    "output": output,
-                    "status": f"Script executed successfully for {state.action} on {state.target_name}",
-                    "changes": changes,
-                    "legacy_changes": [c.details for c in changes],
-                    "metrics": metrics,
-                    "execution_id": execution_id,
-                    "transaction_id": transaction_id
-                }
-            else:
-                return {
-                    "error": error_message or f"Script execution failed with exit code {exit_code}",
-                    "output": output,
-                    "metrics": metrics,
-                    "execution_id": execution_id,
-                    "transaction_id": transaction_id
-                }
-            
-        except Exception as err:
-            logger.exception(f"Error executing script: {err}")
-            return {
-                "error": f"Script execution failed: {str(err)}",
-                "execution_id": execution_id,
-                "transaction_id": transaction_id
-            }
-        finally:
-            self.resource_limiter.release(execution_id)
-            try:
-                if os.path.exists(script_path):
-                    os.unlink(script_path)
-                if os.path.exists(temp_dir):
-                    shutil.rmtree(temp_dir)
-            except Exception as e:
-                logger.warning(f"Error cleaning up temporary files: {e}")
+                # Write script to file
+                script_content = self.platform_manager.get_script_header()
+                script_content.extend([state.script])
+                
+                async with self.resource_manager.temp_file(
+                    suffix=script_ext,
+                    prefix=f"script-{execution_id}-",
+                    content="\n".join(script_content)
+                ) as script_file:
+                    # Execute script
+                    start_time = datetime.utcnow()
+                    try:
+                        process = await self.resource_manager.create_process(
+                            self._get_execution_command(script_file),
+                            cwd=temp_dir
+                        )
+                        
+                        try:
+                            stdout, stderr = await asyncio.wait_for(
+                                process.communicate(),
+                                timeout=self.timeout
+                            )
+                        except asyncio.TimeoutError:
+                            raise TimeoutError(
+                                f"Script execution timed out after {self.timeout} seconds",
+                                details={"timeout": self.timeout, "execution_id": execution_id}
+                            )
+                        
+                        end_time = datetime.utcnow()
+                        duration = (end_time - start_time).total_seconds()
+                        
+                        # Update metrics
+                        metrics.end_time = end_time
+                        metrics.duration = duration
+                        
+                        # Create output data
+                        output = OutputData(
+                            stdout=stdout.decode() if stdout else "",
+                            stderr=stderr.decode() if stderr else "",
+                            exit_code=process.returncode,
+                            duration=duration,
+                            timestamp=end_time
+                        )
+                        
+                        # Check execution status
+                        if process.returncode != 0:
+                            return state.evolve(
+                                error=f"Script execution failed with exit code {process.returncode}",
+                                output=output,
+                                metrics=metrics,
+                                execution_id=execution_id
+                            )
+                        
+                        # Parse changes from output
+                        changes = self._parse_changes(output.stdout)
+                        
+                        # Return successful state
+                        return state.evolve(
+                            output=output,
+                            metrics=metrics,
+                            execution_id=execution_id,
+                            changes=changes
+                        )
+                        
+                    except TimeoutError:
+                        raise
+                    except Exception as e:
+                        raise ExecutionError(
+                            f"Script execution failed: {str(e)}",
+                            details={"execution_id": execution_id, "error": str(e)}
+                        )
+                        
+        except (TimeoutError, ExecutionError) as e:
+            return state.set_error(str(e))
+        except Exception as e:
+            logger.error(f"Unexpected error during script execution: {e}")
+            return state.set_error(f"Unexpected error during script execution: {str(e)}")
+
+    def _get_execution_command(self, script_path: str) -> str:
+        """Get platform-specific command to execute script."""
+        if self.platform_manager.platform_type.value == "windows":
+            return f"powershell -ExecutionPolicy Bypass -File {script_path}"
+        return f"bash {script_path}"
+
+    def _parse_changes(self, output: str) -> list[Change]:
+        """Parse changes from script output."""
+        changes = []
+        for line in output.lower().split('\n'):
+            if "installed package" in line:
+                changes.append(Change(
+                    type="install",
+                    target="package",
+                    revertible=True,
+                    revert_command=self._get_package_revert_command(line)
+                ))
+            elif "created file" in line:
+                changes.append(Change(
+                    type="create",
+                    target="file",
+                    revertible=True,
+                    revert_command=f"rm -f {line.split()[-1]}"
+                ))
+            elif "modified config" in line:
+                changes.append(Change(
+                    type="modify",
+                    target="config",
+                    revertible=True,
+                    revert_command=f"# TODO: Implement config restore"
+                ))
+        return changes
+
+    def _get_package_revert_command(self, line: str) -> str:
+        """Generate package removal command based on package manager."""
+        if self.platform_manager.platform_type.value == "windows":
+            return "choco uninstall {package} -y"
+        
+        # Detect package manager from line
+        if "apt" in line:
+            return "apt-get remove {package} -y"
+        elif "yum" in line:
+            return "yum remove {package} -y"
+        elif "dnf" in line:
+            return "dnf remove {package} -y"
+        elif "zypper" in line:
+            return "zypper remove {package} -y"
+        
+        return "# Unknown package manager"

@@ -18,14 +18,14 @@ class DynamicIntegrationKnowledge:
             logger.info(f"Enhancing workflow state for integration: {state.integration_type}")
             docs = await self.parser.fetch_integration_docs(state.integration_type)
             
-            # Get platform information from system context
-            platform = self._get_platform_info(state.system_context)
+            # Get platform information from system context (with defensive check)
+            platform = self._get_platform_info(state.system_context or {})
             
             # Filter and enhance the documentation data
             platform_specific_docs = self._filter_for_platform(docs, platform)
             
-            # Update the state with both full and filtered documentation
-            if not hasattr(state, 'template_data'):
+            # Update the state with both full and filtered documentation (with defensive check)
+            if not hasattr(state, 'template_data') or state.template_data is None:
                 state.template_data = {}
                 
             state.template_data.update({

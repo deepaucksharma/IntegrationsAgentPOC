@@ -11,24 +11,20 @@ import typer
 from typing_extensions import Annotated
 
 from .core.state import WorkflowState
-from .core.message_bus import MessageBus
-from .execution import ScriptExecutor
-from .scripting import ScriptGenerator, ScriptValidator, DynamicScriptGenerator
-from .verification import DynamicVerificationBuilder
-from .knowledge import DynamicIntegrationKnowledge
-from .strategy import InstallationStrategyAgent
-from .rollback import RecoveryManager
-from .storage import ExecutionHistoryManager
+from .core.container import DependencyContainer
 from .config import (
     WorkflowConfiguration,
     ensure_workflow_config,
     load_config_file,
     find_default_config,
-    merge_configs,
-    initialize_template_environment,
-    load_templates,
+    merge_configs
 )
-from .error.exceptions import ConfigurationError
+from .error.exceptions import (
+    WorkflowError,
+    ConfigurationError,
+    InitializationError,
+    ExecutionError
+)
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.DEBUG)
@@ -43,95 +39,56 @@ class WorkflowAgent:
                 self.config = config
             else:
                 self.config = ensure_workflow_config(config)
+            
+            # Create dependency container
+            self.container = DependencyContainer(self.config)
+            
         except ConfigurationError as e:
             logger.error(f"Configuration error: {e}")
-            sys.exit(1)
-        
-        self.message_bus = MessageBus()
-        self.history_manager = ExecutionHistoryManager()
-        self.executor = ScriptExecutor(history_manager=self.history_manager, timeout=self.config.execution_timeout)
-        self.script_generator = ScriptGenerator(history_manager=self.history_manager)
-        self.script_validator = ScriptValidator()
-        self.dynamic_script_generator = DynamicScriptGenerator()
-        self.dynamic_verification_builder = DynamicVerificationBuilder()
-        self.rollback_manager = RecoveryManager(history_manager=self.history_manager)
-        self.integration_knowledge = DynamicIntegrationKnowledge()
-        self.installation_strategy = InstallationStrategyAgent()
-        
-        # Initialize template environment and load templates
-        initialize_template_environment([self.config.template_dir])
-        load_templates()
+            raise
 
     async def initialize(self) -> None:
         """Initialize all components asynchronously."""
-        await self.executor.initialize()
-        await self.history_manager.initialize()
-        await self.rollback_manager.initialize()
-        if hasattr(self.integration_knowledge, 'initialize'):
-            await self.integration_knowledge.initialize()
-        if hasattr(self.installation_strategy, 'initialize'):
-            await self.installation_strategy.initialize()
+        try:
+            await self.container.initialize()
+            self.container.validate_initialization()
+        except InitializationError as e:
+            logger.error(f"Initialization error: {e}")
+            raise
 
-    async def run_workflow(self, state: WorkflowState) -> Dict[str, Any]:
+    async def run_workflow(self, state: WorkflowState) -> WorkflowState:
         """Runs a workflow based on the given state."""
         try:
             # Check privileges if needed
             if state.action in ["install", "setup", "remove"] and self.config.least_privilege_execution:
-                try:
-                    import ctypes
-                    if sys.platform == "win32":
-                        is_admin = ctypes.windll.shell32.IsUserAnAdmin()
-                        if not is_admin:
-                            return {
-                                "error": (
-                                    "This operation requires administrator privileges. "
-                                    "Please run PowerShell or Command Prompt as Administrator and try again.\n"
-                                    "Right-click PowerShell/Command Prompt -> Run as Administrator"
-                                )
-                            }
-                    else:
-                        is_admin = os.geteuid() == 0
-                        if not is_admin:
-                            return {
-                                "error": (
-                                    "This operation requires root privileges. "
-                                    "Please run with sudo or as root:\n"
-                                    "sudo python test_workflow.py"
-                                )
-                            }
-                except Exception as e:
-                    logger.warning(f"Could not check privileges: {e}")
-                    # If we can't check privileges, warn but continue
-                    state.warnings.append(
-                        "Could not verify administrator privileges. "
-                        "If the operation fails, try running as Administrator/root."
-                    )
-            
+                state = await self._check_privileges(state)
+                if state.error:
+                    return state
+
             # Enhance state with dynamic knowledge
             try:
-                state = await self.integration_knowledge.enhance_workflow_state(state)
-            except AttributeError as e:
-                logger.error(f"Failed to enhance workflow state - missing attribute: {e}")
-                return {"error": f"Configuration error: {str(e)}"}
-            except KeyError as e:
-                logger.error(f"Failed to enhance workflow state - missing key: {e}")
-                return {"error": f"Configuration error: {str(e)}"}
-            
+                integration_knowledge = self.container.get('integration_knowledge')
+                state = await integration_knowledge.enhance_workflow_state(state)
+            except Exception as e:
+                return state.set_error(f"Failed to enhance workflow state: {str(e)}")
+
             # Select installation method if needed
             if state.action in ["install", "setup"] and not state.template_data.get("selected_method"):
                 try:
-                    state = await self.installation_strategy.determine_best_approach(state)
-                except ValueError as e:
-                    logger.error(f"Failed to determine installation approach: {e}")
-                    return {"error": f"Installation strategy error: {str(e)}"}
-            
+                    installation_strategy = self.container.get('installation_strategy')
+                    state = await installation_strategy.determine_best_approach(state)
+                except Exception as e:
+                    return state.set_error(f"Failed to determine installation approach: {str(e)}")
+
             # Generate script
             if not state.script:
                 try:
                     if state.template_key:
-                        script_generation_result = await self.script_generator.generate_script(state, config={"configurable": self.config.__dict__})
+                        # Pass configuration correctly
+                        config_dict = {"configurable": self.config.__dict__}
+                        script_generation_result = await self.container.get('script_generator').generate_script(state, config=config_dict)
                     elif state.action in ["install", "setup", "remove", "uninstall"]:
-                        script_generation_result = await self.dynamic_script_generator.generate_from_knowledge(state)
+                        script_generation_result = await self.container.get('dynamic_script_generator').generate_from_knowledge(state)
                     else:
                         script_generation_result = {"error": "No template or dynamic script generation available for this action."}
                     
@@ -141,81 +98,119 @@ class WorkflowAgent:
                 except (ValueError, KeyError) as e:
                     logger.error(f"Script generation failed: {e}")
                     return {"error": f"Script generation error: {str(e)}"}
-            
+
             # Validate script
-            validation_result = await self.script_validator.validate_script(state, config={"configurable": self.config.__dict__})
-            if validation_result.get("warnings"):
-                for warning in validation_result["warnings"]:
-                    logger.warning(f"Script validation warning: {warning}")
-            if validation_result.get("error"):
-                return validation_result
-            
-            # Run script
-            execution_result = await self.executor.run_script(state, config={"configurable": self.config.__dict__})
-            if execution_result.get("error"):
-                logger.error(f"Script execution failed: {execution_result['error']}")
-                # Perform rollback if script execution fails
-                logger.info("Initiating rollback due to script execution failure...")
-                rollback_result = await self.rollback_manager.perform_rollback(state, config={"configurable": self.config.__dict__})
-                if rollback_result.get("error"):
-                    logger.error(f"Rollback failed: {rollback_result['error']}")
-                    execution_result["rollback_error"] = rollback_result["error"]
-                else:
-                    logger.info("Rollback completed successfully")
-                    execution_result["rollback_status"] = "success"
-                return execution_result
-            
-            # Build verification script if needed
-            if state.action in ["install", "setup"] and self.config.skip_verification is False:
-                verification_script = await self.dynamic_verification_builder.build_verification_script(state)
-                verification_state = WorkflowState(
-                    action="verify",
-                    target_name=state.target_name,
-                    integration_type=state.integration_type,
-                    script=verification_script,
-                    parameters=state.parameters,
-                    template_data=state.template_data,
-                    system_context=state.system_context,
-                    isolation_method=state.isolation_method,
-                    transaction_id=execution_result.get("transaction_id"),
-                    execution_id=execution_result.get("execution_id")
-                )
-                verification_result = await self.executor.run_script(verification_state, config={"configurable": self.config.__dict__})
-                if verification_result.get("error"):
-                    logger.error(f"Verification failed: {verification_result['error']}")
-                    # Rollback if verification fails
-                    logger.info("Initiating rollback due to verification failure...")
-                    rollback_result = await self.rollback_manager.perform_rollback(state, config={"configurable": self.config.__dict__})
-                    if rollback_result.get("error"):
-                        logger.error(f"Rollback failed: {rollback_result['error']}")
-                        verification_result["rollback_error"] = rollback_result["error"]
-                    else:
-                        logger.info("Rollback completed successfully")
-                        verification_result["rollback_status"] = "success"
-                    return verification_result
-                
-            return execution_result
-        
-        except Exception as e:
-            logger.error(f"Unexpected error during workflow execution: {str(e)}")
-            # Attempt rollback on unexpected errors
             try:
-                logger.info("Initiating rollback due to unexpected error...")
-                rollback_result = await self.rollback_manager.perform_rollback(state, config={"configurable": self.config.__dict__})
-                if rollback_result.get("error"):
-                    logger.error(f"Rollback failed: {rollback_result['error']}")
-                    return {"error": str(e), "rollback_error": rollback_result["error"]}
-                else:
-                    logger.info("Rollback completed successfully")
-                    return {"error": str(e), "rollback_status": "success"}
-            except Exception as rollback_error:
-                logger.error(f"Failed to perform rollback: {str(rollback_error)}")
-                return {"error": str(e), "rollback_error": str(rollback_error)}
-    
+                script_validator = self.container.get('script_validator')
+                validation_result = await script_validator.validate_script(state, config={"configurable": self.config.__dict__})
+                if validation_result.get("warnings"):
+                    for warning in validation_result["warnings"]:
+                        state = state.add_warning(warning)
+                if validation_result.get("error"):
+                    return state.set_error(validation_result["error"])
+            except Exception as e:
+                return state.set_error(f"Script validation failed: {str(e)}")
+
+            # Execute script
+            try:
+                script_executor = self.container.get('script_executor')
+                state = await script_executor.run_script(state, config={"configurable": self.config.__dict__})
+                if state.error:
+                    return await self._handle_execution_failure(state)
+            except Exception as e:
+                return await self._handle_execution_failure(state.set_error(str(e)))
+
+            # Build and run verification if needed
+            if state.action in ["install", "setup"] and not self.config.skip_verification:
+                try:
+                    verification_builder = self.container.get('verification_builder')
+                    verification_script = await verification_builder.build_verification_script(state)
+                    
+                    verification_state = WorkflowState(
+                        action="verify",
+                        target_name=state.target_name,
+                        integration_type=state.integration_type,
+                        script=verification_script,
+                        parameters=state.parameters,
+                        template_data=state.template_data,
+                        system_context=state.system_context,
+                        isolation_method=state.isolation_method,
+                        transaction_id=state.transaction_id,
+                        execution_id=state.execution_id
+                    )
+                    
+                    verification_state = await script_executor.run_script(
+                        verification_state,
+                        config={"configurable": self.config.__dict__}
+                    )
+                    
+                    if verification_state.error:
+                        return await self._handle_execution_failure(verification_state)
+                        
+                except Exception as e:
+                    return await self._handle_execution_failure(state.set_error(f"Verification failed: {str(e)}"))
+
+            return state
+
+        except Exception as e:
+            logger.error(f"Unexpected error during workflow execution: {e}")
+            return await self._handle_execution_failure(state.set_error(f"Unexpected error: {str(e)}"))
+
     async def close(self) -> None:
         """Closes the agent and releases resources."""
-        await self.executor.cleanup()
-        logger.info("Workflow agent closed.")
+        try:
+            await self.container.cleanup()
+        except Exception as e:
+            logger.error(f"Error during cleanup: {e}")
+            raise
+
+    async def _check_privileges(self, state: WorkflowState) -> WorkflowState:
+        """Check if the agent has necessary privileges."""
+        try:
+            platform_manager = self.container.get('platform_manager')
+            if platform_manager.platform_type.value == "windows":
+                import ctypes
+                is_admin = ctypes.windll.shell32.IsUserAnAdmin()
+                if not is_admin:
+                    return state.set_error(
+                        "This operation requires administrator privileges. "
+                        "Please run PowerShell or Command Prompt as Administrator and try again.\n"
+                        "Right-click PowerShell/Command Prompt -> Run as Administrator"
+                    )
+            else:
+                is_admin = os.geteuid() == 0
+                if not is_admin:
+                    return state.set_error(
+                        "This operation requires root privileges. "
+                        "Please run with sudo or as root:\n"
+                        "sudo python test_workflow.py"
+                    )
+        except Exception as e:
+            logger.warning(f"Could not check privileges: {e}")
+            return state.add_warning(
+                "Could not verify administrator privileges. "
+                "If the operation fails, try running as Administrator/root."
+            )
+        return state
+
+    async def _handle_execution_failure(self, state: WorkflowState) -> WorkflowState:
+        """Handle execution failure and perform rollback if needed."""
+        try:
+            logger.info(f"Initiating rollback for {state.target_name} due to: {state.error}")
+            recovery_manager = self.container.get('recovery_manager')
+            rollback_result = await recovery_manager.perform_rollback(
+                state,
+                config={"configurable": self.config.__dict__}
+            )
+            
+            if isinstance(rollback_result, dict) and rollback_result.get("error"):
+                return state.add_warning(f"Rollback failed: {rollback_result['error']}")
+            
+            return state.add_warning("Rollback completed successfully")
+            
+        except Exception as e:
+            logger.error(f"Failed to perform rollback: {e}")
+            return state.add_warning(f"Failed to perform rollback: {str(e)}")
 
 app = typer.Typer(help="Workflow Agent CLI")
 
@@ -263,14 +258,12 @@ def install(
         finally:
             loop.close()
         
-        if result.get("error"):
-            typer.echo(f"Error: {result['error']}", err=True)
+        if result.error:
+            typer.echo(f"Error: {result.error}", err=True)
             raise typer.Exit(1)
         typer.echo("Installation completed successfully")
         return result
     except Exception as e:
-        print(f"Exception occurred: {str(e)}")
-        logger.exception("Detailed error trace:")
         typer.echo(f"Error: {str(e)}", err=True)
         raise typer.Exit(1)
 
@@ -300,8 +293,8 @@ def remove(
         finally:
             loop.close()
         
-        if result.get("error"):
-            typer.echo(f"Error: {result['error']}", err=True)
+        if result.error:
+            typer.echo(f"Error: {result.error}", err=True)
             raise typer.Exit(1)
         typer.echo("Removal completed successfully")
         return result
@@ -335,8 +328,8 @@ def verify(
         finally:
             loop.close()
         
-        if result.get("error"):
-            typer.echo(f"Error: {result['error']}", err=True)
+        if result.error:
+            typer.echo(f"Error: {result.error}", err=True)
             raise typer.Exit(1)
         typer.echo("Verification completed successfully")
         return result

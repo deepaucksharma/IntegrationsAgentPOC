@@ -151,3 +151,7 @@ elif command -v zypper >/dev/null 2>&1; then
 fi
 """
             return None
+
+    async def perform_rollback(self, state: WorkflowState, config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Alias for rollback_changes to maintain API compatibility."""
+        return await self.rollback_changes(state, config)
