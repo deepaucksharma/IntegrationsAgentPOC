@@ -6,18 +6,12 @@ configurable:
   isolation_method: "docker"
   execution_timeout: 30000
   skip_verification: false
-  use_llm_optimization: false
   rule_based_optimization: true
   use_static_analysis: true
   db_connection_string: "workflow_history.db"
-  db_type: "sqlite"
   prune_history_days: 90
   plugin_dirs:
     - "./plugins"
-  async_execution: false
   max_concurrent_tasks: 5
   least_privilege_execution: true
-  sandbox_isolation: false
   log_level: "INFO"
-  enable_telemetry: false
-  enable_metrics: true

@@ -1,5 +1,10 @@
-# src/workflow_agent/integrations/__init__.py
+"""Integration components for workflow agent."""
 from .base import IntegrationBase
-from .registry import IntegrationRegistry, IntegrationHandler
+from .registry import IntegrationRegistry
+from .handlers import InfraAgentIntegration
 
-__all__ = ["IntegrationBase", "IntegrationRegistry", "IntegrationHandler"]
+__all__ = [
+    "IntegrationBase",
+    "IntegrationRegistry",
+    "InfraAgentIntegration"
+]

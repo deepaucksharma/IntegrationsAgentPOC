@@ -1,229 +1,135 @@
-# src/workflow_agent/storage/history.py
-import os
+"""History storage for workflow agent."""
 import logging
+import json
+import asyncio
+import sqlite3
+import time
+import os
+from datetime import datetime
 from typing import Dict, Any, List, Optional, Union
-from .models import ExecutionRecord
-from .adapters import get_adapter, SQLiteAdapter, PostgreSQLAdapter, MySQLAdapter
+from contextlib import asynccontextmanager
 
 logger = logging.getLogger(__name__)
 
 class HistoryManager:
-    """Manages execution history records across different database backends."""
+    """Manages execution history for the workflow agent."""
     
-    def __init__(self, connection_string: Optional[str] = None):
-        """
-        Initialize the history manager.
-        
-        Args:
-            connection_string: Optional database connection string
-        """
-        self.adapter = get_adapter(connection_string)
-        
+    def __init__(self, db_path: Optional[str] = None):
+        self.db_path = db_path or "workflow_history.db"
+        self.connection = None
+        self._lock = asyncio.Lock()
+    
     async def initialize(self, config: Optional[Dict[str, Any]] = None) -> None:
-        """
-        Initialize the history storage.
-        
-        Args:
-            config: Optional configuration dictionary
-        """
-        if config and "configurable" in config and "db_connection_string" in config["configurable"]:
-            self.adapter = get_adapter(config["configurable"]["db_connection_string"])
-        await self.adapter.initialize()
-        
+        if config and "configurable" in config:
+            configurable = config["configurable"]
+            if "db_connection_string" in configurable:
+                self.db_path = configurable["db_connection_string"]
+        db_dir = os.path.dirname(self.db_path)
+        if db_dir and not os.path.exists(db_dir):
+            os.makedirs(db_dir)
+        async with self._get_connection() as conn:
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS execution_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    target_name TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    success BOOLEAN NOT NULL,
+                    execution_time INTEGER NOT NULL,
+                    error_message TEXT,
+                    script TEXT NOT NULL,
+                    output TEXT,
+                    parameters TEXT,
+                    transaction_id TEXT,
+                    user_id TEXT,
+                    timestamp INTEGER NOT NULL
+                )
+            ''')
+            conn.execute('''
+                CREATE INDEX IF NOT EXISTS idx_execution_history_target_action
+                ON execution_history (target_name, action)
+            ''')
+            conn.execute('''
+                CREATE INDEX IF NOT EXISTS idx_execution_history_transaction_id
+                ON execution_history (transaction_id)
+            ''')
+    
+    async def close(self) -> None:
+        async with self._lock:
+            if self.connection:
+                self.connection.close()
+                self.connection = None
+    
+    async def cleanup(self) -> None:
+        await self.close()
+    
+    @asynccontextmanager
+    async def _get_connection(self):
+        async with self._lock:
+            if not self.connection:
+                self.connection = sqlite3.connect(self.db_path)
+                self.connection.row_factory = sqlite3.Row
+            try:
+                yield self.connection
+            finally:
+                pass
+    
     async def save_execution(
         self,
         target_name: str,
         action: str,
         success: bool,
         execution_time: int,
-        error_message: Optional[str],
-        system_context: dict,
         script: str,
-        output: dict = None,
-        parameters: dict = None,
-        transaction_id: str = None,
-        user_id: str = None
+        error_message: Optional[str] = None,
+        output: Optional[Union[str, Dict[str, Any]]] = None,
+        parameters: Optional[Dict[str, Any]] = None,
+        transaction_id: Optional[str] = None,
+        user_id: Optional[str] = None
     ) -> int:
-        """
-        Save an execution record.
-        
-        Args:
-            target_name: Name of the target system
-            action: Action performed
-            success: Whether the execution was successful
-            execution_time: Time taken for execution in milliseconds
-            error_message: Error message if execution failed
-            system_context: System context information
-            script: Script that was executed
-            output: Output from script execution
-            parameters: Parameters used for execution
-            transaction_id: ID for tracking related operations
-            user_id: ID of user who initiated the execution
-            
-        Returns:
-            ID of the saved record
-        """
-        return await self.adapter.save_execution(
-            target_name=target_name,
-            action=action,
-            success=success,
-            execution_time=execution_time,
-            error_message=error_message,
-            system_context=system_context,
-            script=script,
-            output=output,
-            parameters=parameters,
-            transaction_id=transaction_id,
-            user_id=user_id
-        )
+        if isinstance(output, dict):
+            output = json.dumps(output)
+        parameters_json = json.dumps(parameters) if parameters else None
+        try:
+            async with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT INTO execution_history
+                    (target_name, action, success, execution_time, error_message, script, output,
+                     parameters, transaction_id, user_id, timestamp)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    target_name,
+                    action,
+                    success,
+                    execution_time,
+                    error_message,
+                    script,
+                    output,
+                    parameters_json,
+                    transaction_id,
+                    user_id,
+                    int(time.time())
+                ))
+                conn.commit()
+                return cursor.lastrowid
+        except Exception as e:
+            logger.error(f"Failed to save execution record: {e}")
+            raise
     
-    async def get_execution_history(
-        self,
-        target: str,
-        action: str,
-        limit: int = 10,
-        user_id: str = None
-    ) -> List[Dict[str, Any]]:
-        """
-        Get execution history for a specific target and action.
-        
-        Args:
-            target: Target name to filter by
-            action: Action to filter by
-            limit: Maximum number of records to return
-            user_id: Optional user ID to filter by
-            
-        Returns:
-            List of execution records
-        """
-        return await self.adapter.get_execution_history(
-            target=target,
-            action=action,
-            limit=limit,
-            user_id=user_id
-        )
-    
-    async def get_execution_statistics(
-        self,
-        target: str,
-        action: str,
-        user_id: str = None
-    ) -> Dict[str, Any]:
-        """
-        Get statistics for a specific target and action.
-        
-        Args:
-            target: Target name to filter by
-            action: Action to filter by
-            user_id: Optional user ID to filter by
-            
-        Returns:
-            Dictionary with execution statistics
-        """
-        return await self.adapter.get_execution_statistics(
-            target=target,
-            action=action,
-            user_id=user_id
-        )
-    
-    async def clear_history(
-        self,
-        target: str = None,
-        action: str = None,
-        days: int = None,
-        user_id: str = None
-    ) -> int:
-        """
-        Clear execution history.
-        
-        Args:
-            target: Optional target name to filter by
-            action: Optional action to filter by
-            days: Optional number of days to keep (older records will be deleted)
-            user_id: Optional user ID to filter by
-            
-        Returns:
-            Number of records deleted
-        """
-        return await self.adapter.clear_history(
-            target=target,
-            action=action,
-            days=days,
-            user_id=user_id
-        )
-    
-    async def get_transaction_history(self, transaction_id: str) -> List[Dict[str, Any]]:
-        """
-        Get all records for a specific transaction.
-        
-        Args:
-            transaction_id: Transaction ID to filter by
-            
-        Returns:
-            List of execution records
-        """
-        return await self.adapter.get_transaction_history(transaction_id)
-    
-    async def auto_prune_history(self, days: int = 90) -> None:
-        """
-        Automatically prune old history records.
-        
-        Args:
-            days: Number of days to keep (older records will be deleted)
-        """
-        if days > 0:
-            count = await self.adapter.clear_history(days=days)
-            logger.info(f"Auto-pruned {count} execution records older than {days} days.")
-    
-    async def close(self):
-        """Close database connections."""
-        await self.adapter.close()
-    
-    # Synchronous versions for backward compatibility
-    def save_execution_sync(
-        self,
-        target_name: str,
-        action: str,
-        success: bool,
-        execution_time: int,
-        error_message: Optional[str],
-        system_context: dict,
-        script: str,
-        output: dict = None,
-        parameters: dict = None,
-        transaction_id: str = None,
-        user_id: str = None
-    ) -> int:
-        """Synchronous version of save_execution."""
-        return self.adapter.save_execution_sync(
-            target_name=target_name,
-            action=action,
-            success=success,
-            execution_time=execution_time,
-            error_message=error_message,
-            system_context=system_context,
-            script=script,
-            output=output,
-            parameters=parameters,
-            transaction_id=transaction_id,
-            user_id=user_id
-        )
-    
-    def get_execution_history_sync(
-        self,
-        target: str,
-        action: str,
-        limit: int = 10,
-        user_id: str = None
-    ) -> List[Dict[str, Any]]:
-        """Synchronous version of get_execution_history."""
-        return self.adapter.get_execution_history_sync(
-            target=target,
-            action=action,
-            limit=limit,
-            user_id=user_id
-        )
-    
-    async def cleanup(self) -> None:
-        """Clean up resources."""
-        await self.close()
+    async def auto_prune_history(self, days: int) -> int:
+        if days <= 0:
+            return 0
+        cutoff = int(time.time() - days * 86400)
+        try:
+            async with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT COUNT(*) FROM execution_history WHERE timestamp < ?", (cutoff,))
+                count = cursor.fetchone()[0]
+                if count == 0:
+                    return 0
+                cursor.execute("DELETE FROM execution_history WHERE timestamp < ?", (cutoff,))
+                conn.commit()
+                return count
+        except Exception as e:
+            logger.error(f"Failed to prune history: {e}")
+            return 0

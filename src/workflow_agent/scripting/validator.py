@@ -1,146 +1,98 @@
-# src/workflow_agent/scripting/validator.py
-import re
+"""Script validation for workflow agent."""
 import logging
+import re
 import tempfile
 import os
-import uuid
-from typing import Dict, Any, Optional, List, Tuple
-from pathlib import Path
+import subprocess
+import json
+from typing import Dict, Any, Optional, List
+
 from ..core.state import WorkflowState
 from ..config.configuration import dangerous_patterns, ensure_workflow_config
 
 logger = logging.getLogger(__name__)
 
 class ScriptValidator:
-    """Validates scripts for safety and proper error handling."""
-    
-    def __init__(self):
-        """Initialize the script validator."""
-        self.dangerous_patterns = dangerous_patterns
+    """Validates scripts for security, correctness, and best practices."""
     
     async def validate_script(
         self,
         state: WorkflowState,
         config: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
-        """
-        Validate the script for safety and proper error handling.
+        if not state.script:
+            logger.error("No script to validate")
+            return {"error": "No script to validate."}
         
-        Args:
-            state: Current workflow state
-            config: Optional configuration
-            
-        Returns:
-            Dict with validation results or error
-        """
-        if not state.script or not state.script.strip():
-            error_msg = "Script validation failed: Empty script"
-            logger.error(error_msg)
-            return {"error": error_msg}
+        logger.info(f"Validating script for {state.action} on {state.target_name}")
+        workflow_config = ensure_workflow_config(config or {})
+        warnings = []
         
-        # Check for dangerous patterns
-        for pattern in self.dangerous_patterns:
-            if re.search(pattern, state.script):
-                error_msg = f"Script validation failed: Potentially dangerous command detected ({pattern})."
-                logger.error(error_msg)
-                return {"error": error_msg}
+        # Check dangerous patterns
+        dangerous_found = []
+        for pattern in dangerous_patterns:
+            matches = re.findall(pattern, state.script, re.IGNORECASE | re.MULTILINE)
+            if matches:
+                dangerous_found.append(pattern)
+        if dangerous_found:
+            logger.warning(f"Potentially dangerous patterns found: {dangerous_found}")
+            warnings.append("Script contains potentially dangerous patterns")
         
-        # Verify basic script requirements
-        if not any(line.startswith("#!/") for line in state.script.split("\n")):
-            error_msg = "Script validation failed: Missing proper shebang (#!/usr/bin/env bash or #!/bin/bash)."
-            logger.error(error_msg)
-            return {"error": error_msg}
+        if "#!/usr/bin/env bash" not in state.script and "#!/bin/bash" not in state.script:
+            logger.warning("Script is missing shebang")
+            warnings.append("Script is missing shebang (#!/usr/bin/env bash)")
         
         if "set -e" not in state.script:
-            error_msg = "Script validation failed: Missing 'set -e' for proper error handling."
-            logger.error(error_msg)
-            return {"error": error_msg}
+            logger.warning("Script is missing error handling (set -e)")
+            warnings.append("Script is missing error handling (set -e)")
         
-        # Check script size
-        if len(state.script) > 50000:
-            logger.warning(f"Script is very large ({len(state.script)} bytes). This might indicate a problem.")
+        # Check for command injection characters in parameters
+        for key, value in state.parameters.items():
+            if isinstance(value, str) and any(c in value for c in ";|&`$(){}[]<>\\"):
+                logger.warning(f"Parameter '{key}' might contain command injection characters")
+                warnings.append(f"Parameter '{key}' might contain command injection characters")
         
-        # Get workflow configuration
-        workflow_config = ensure_workflow_config(config)
-        
-        # Perform static analysis if enabled
+        # Perform ShellCheck analysis if enabled
         if workflow_config.use_static_analysis:
-            validation_result = await self._perform_static_analysis(state.script)
-            
-            if validation_result["error"]:
-                error_msg = f"Script validation failed: Static analysis error: {validation_result['error']}"
-                logger.error(error_msg)
-                return {"error": error_msg}
-            
-            if validation_result["warnings"]:
-                logger.warning(f"Static analysis warnings: {validation_result['warnings']}")
-                return {"warnings": validation_result["warnings"]}
+            try:
+                import shellcheck_py
+                with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.sh') as tf:
+                    script_path = tf.name
+                    tf.write(state.script)
+                try:
+                    shellcheck_bin = shellcheck_py.SHELLCHECK_PATH
+                    cmd = [shellcheck_bin, '--format=json1', script_path]
+                    proc = subprocess.run(cmd, capture_output=True, text=True)
+                    if proc.stdout.strip():
+                        try:
+                            data = json.loads(proc.stdout)
+                            comments = data.get('comments', [])
+                            shellcheck_warnings = []
+                            for comment in comments:
+                                lvl = comment.get('level', '').lower()
+                                message = comment.get('message', '')
+                                if lvl == 'error':
+                                    shellcheck_warnings.append(f"ShellCheck error: {message}")
+                                elif lvl == 'warning':
+                                    shellcheck_warnings.append(f"ShellCheck warning: {message}")
+                            if shellcheck_warnings:
+                                logger.warning(f"ShellCheck found {len(shellcheck_warnings)} issues")
+                                warnings.extend(shellcheck_warnings)
+                        except json.JSONDecodeError:
+                            logger.warning(f"ShellCheck output not valid JSON: {proc.stdout}")
+                            warnings.append("ShellCheck returned invalid JSON output.")
+                    if proc.stderr.strip():
+                        logger.debug(f"ShellCheck stderr: {proc.stderr.strip()}")
+                finally:
+                    os.unlink(script_path)
+            except ImportError:
+                logger.info("ShellCheck (shellcheck-py) not installed; skipping static analysis")
         
+        if dangerous_found:
+            logger.error("Script validation failed due to dangerous patterns")
+            return {"error": "Script validation failed: dangerous patterns detected.", "warnings": warnings}
+        if warnings:
+            logger.info(f"Script validation passed with warnings: {warnings}")
+            return {"warnings": warnings}
         logger.info("Script validation passed successfully")
         return {}
-    
-    async def _perform_static_analysis(self, script: str) -> Dict[str, Any]:
-        """
-        Perform static analysis on the script using ShellCheck if available.
-        
-        Args:
-            script: Script content to analyze
-            
-        Returns:
-            Dict with analysis results
-        """
-        result = {
-            "error": None,
-            "warnings": []
-        }
-        
-        # Check if ShellCheck is available
-        try:
-            import shellcheck_py
-        except ImportError:
-            logger.info("ShellCheck not available for static analysis")
-            return result
-        
-        try:
-            # Create temporary file
-            temp_script_path = os.path.join(tempfile.gettempdir(), f"script_{uuid.uuid4()}.sh")
-            with open(temp_script_path, "w") as f:
-                f.write(script)
-            
-            # Run ShellCheck
-            issues = shellcheck_py.parse(temp_script_path)
-            
-            # Process results
-            critical_issues = []
-            warnings = []
-            
-            for issue in issues:
-                level = issue.get("level", "info")
-                message = issue.get("message", "")
-                code = issue.get("code", "")
-                line = issue.get("line", 0)
-                
-                issue_text = f"Line {line}: SC{code} - {message}"
-                
-                # Categorize issues
-                if level == "error":
-                    critical_issues.append(issue_text)
-                elif level == "warning":
-                    warnings.append(issue_text)
-            
-            # Set result
-            if critical_issues:
-                result["error"] = f"Critical issues found: {'; '.join(critical_issues)}"
-            
-            result["warnings"] = warnings
-            
-            # Clean up temporary file
-            try:
-                os.remove(temp_script_path)
-            except:
-                pass
-                
-            return result
-        except Exception as e:
-            logger.error(f"Error performing static analysis: {e}")
-            return result

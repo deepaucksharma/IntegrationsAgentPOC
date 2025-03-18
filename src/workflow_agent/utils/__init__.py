@@ -1,5 +1,10 @@
-# src/workflow_agent/utils/__init__.py
-from .system import get_system_context
-from .logging import setup_logging
+"""Utility functions for workflow agent."""
+from .logging import setup_logging, get_logger
+from .system import get_system_context, execute_command
 
-__all__ = ["get_system_context", "setup_logging"]
+__all__ = [
+    "setup_logging",
+    "get_logger",
+    "get_system_context",
+    "execute_command"
+]

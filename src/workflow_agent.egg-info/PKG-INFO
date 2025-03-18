@@ -1,0 +1,36 @@
+Metadata-Version: 2.2
+Name: workflow-agent
+Version: 0.1.0
+Summary: A Python framework for orchestrating multi-step workflows with AI-driven adaptation.
+Author: Your Name
+Author-email: you@example.com
+Classifier: Development Status :: 4 - Beta
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.8
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Programming Language :: Python :: 3.10
+Requires-Python: >=3.8
+Requires-Dist: jinja2>=3.1.2
+Requires-Dist: typer>=0.9.0
+Requires-Dist: PyYAML>=6.0
+Requires-Dist: psutil>=5.9.5
+Provides-Extra: llm
+Requires-Dist: langchain-openai>=0.0.1; extra == "llm"
+Provides-Extra: doc
+Requires-Dist: sphinx; extra == "doc"
+Requires-Dist: sphinx-rtd-theme; extra == "doc"
+Provides-Extra: dev
+Requires-Dist: black; extra == "dev"
+Requires-Dist: isort; extra == "dev"
+Requires-Dist: pylint; extra == "dev"
+Requires-Dist: mypy; extra == "dev"
+Requires-Dist: shellcheck-py>=0.9.0.6; extra == "dev"
+Dynamic: author
+Dynamic: author-email
+Dynamic: classifier
+Dynamic: provides-extra
+Dynamic: requires-dist
+Dynamic: requires-python
+Dynamic: summary

@@ -1,1 +1,0 @@
-workflow-agent=workflow_agent.cli.main:app 
