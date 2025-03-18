@@ -1,6 +1,7 @@
 """Configuration management for workflow agent."""
 import os
 import logging
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 import yaml
@@ -35,9 +36,11 @@ class WorkflowConfiguration:
         self.template_dir = template_dir
         self.custom_template_dir = custom_template_dir
         self.use_isolation = use_isolation
+        
         if isolation_method not in VALID_ISOLATION_METHODS:
             raise ValueError(f"Invalid isolation method: {isolation_method}")
         self.isolation_method = isolation_method
+        
         self.execution_timeout = execution_timeout
         self.skip_verification = skip_verification
         self.rule_based_optimization = rule_based_optimization
@@ -53,8 +56,11 @@ def ensure_workflow_config(config: Optional[Dict[str, Any]] = None) -> WorkflowC
     """Ensure a valid workflow configuration exists."""
     if config is None:
         config = {}
+    
+    # If nested under "configurable", flatten it
     if "configurable" in config:
         config = config["configurable"]
+    
     try:
         return WorkflowConfiguration(**config)
     except Exception as e:
@@ -62,7 +68,7 @@ def ensure_workflow_config(config: Optional[Dict[str, Any]] = None) -> WorkflowC
         raise ConfigurationError(f"Invalid configuration: {e}")
 
 # List of dangerous command patterns for script validation
-dangerous_patterns = [
+dangerous_patterns: List[str] = [
     r"rm\s+(-rf?\s+)?\/(?!\w)",
     r"mkfs",
     r"dd\s+if=.*\s+of=\/dev",

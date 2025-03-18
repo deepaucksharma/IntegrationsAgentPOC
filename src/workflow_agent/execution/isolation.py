@@ -16,14 +16,19 @@ async def run_script_direct(
     """Execute the script directly on the host system."""
     process = None
     timeout_sec = timeout_ms / 1000
+    
     try:
         process = await asyncio.create_subprocess_exec(
             script_path,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
+        
         try:
-            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout_sec)
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(),
+                timeout=timeout_sec
+            )
             stdout_str = stdout.decode('utf-8')
             stderr_str = stderr.decode('utf-8')
             success = process.returncode == 0
@@ -61,6 +66,7 @@ async def run_script_docker(
     least_privilege: bool = True
 ) -> Tuple[bool, str, str, int, Optional[str]]:
     """Execute the script in an isolated Docker container."""
+    # Check if Docker is available
     try:
         process = await asyncio.create_subprocess_exec(
             "docker", "--version",
@@ -82,6 +88,7 @@ async def run_script_docker(
     container_name = f"workflow-{uuid.uuid4().hex[:8]}"
     docker_image = "alpine:latest"
     docker_cmd = ["docker", "run", "--rm", "--name", container_name]
+    
     if least_privilege:
         docker_cmd.extend([
             "--read-only",
@@ -95,6 +102,7 @@ async def run_script_docker(
     
     process = None
     timeout_sec = timeout_ms / 1000
+    
     try:
         logger.info(f"Running script in Docker container: {container_name}")
         process = await asyncio.create_subprocess_exec(
@@ -102,8 +110,12 @@ async def run_script_docker(
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
+        
         try:
-            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout_sec)
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(),
+                timeout=timeout_sec
+            )
             stdout_str = stdout.decode('utf-8')
             stderr_str = stderr.decode('utf-8')
             success = process.returncode == 0
@@ -143,6 +155,7 @@ async def run_script_docker(
             await kill_process.wait()
         except:
             pass
+        
         if process:
             process.kill()
             try:
@@ -159,6 +172,6 @@ async def run_script_docker(
             if os.path.exists(container_script_path):
                 os.unlink(container_script_path)
             if os.path.exists(temp_dir):
-                os.rmdir(temp_dir)
+                shutil.rmtree(temp_dir, ignore_errors=True)
         except Exception as e:
             logger.error(f"Failed to clean up container script: {e}")

@@ -24,9 +24,11 @@ class HistoryManager:
             configurable = config["configurable"]
             if "db_connection_string" in configurable:
                 self.db_path = configurable["db_connection_string"]
+        
         db_dir = os.path.dirname(self.db_path)
         if db_dir and not os.path.exists(db_dir):
             os.makedirs(db_dir)
+        
         async with self._get_connection() as conn:
             conn.execute('''
                 CREATE TABLE IF NOT EXISTS execution_history (
@@ -88,7 +90,11 @@ class HistoryManager:
     ) -> int:
         if isinstance(output, dict):
             output = json.dumps(output)
-        parameters_json = json.dumps(parameters) if parameters else None
+        if parameters:
+            parameters_json = json.dumps(parameters)
+        else:
+            parameters_json = None
+        
         try:
             async with self._get_connection() as conn:
                 cursor = conn.cursor()
@@ -111,7 +117,8 @@ class HistoryManager:
                     int(time.time())
                 ))
                 conn.commit()
-                return cursor.lastrowid
+                record_id = cursor.lastrowid
+                return record_id
         except Exception as e:
             logger.error(f"Failed to save execution record: {e}")
             raise
@@ -120,6 +127,7 @@ class HistoryManager:
         if days <= 0:
             return 0
         cutoff = int(time.time() - days * 86400)
+        
         try:
             async with self._get_connection() as conn:
                 cursor = conn.cursor()

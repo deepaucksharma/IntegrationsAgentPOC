@@ -54,11 +54,13 @@ async def execute_command(
             stdout=asyncio.subprocess.PIPE if capture_output else None,
             stderr=asyncio.subprocess.PIPE if capture_output else None
         )
+        
         try:
             stdout, stderr = await asyncio.wait_for(
                 process.communicate(),
                 timeout=timeout
             )
+            
             return {
                 "success": process.returncode == 0,
                 "return_code": process.returncode,

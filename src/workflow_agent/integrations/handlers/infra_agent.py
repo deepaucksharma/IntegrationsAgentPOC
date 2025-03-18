@@ -76,7 +76,10 @@ systemctl start monitoring-agent
 
 echo "Monitoring agent installed successfully"
 """
-            return {"script": script, "source": "infra_agent_integration"}
+            return {
+                "script": script,
+                "source": "infra_agent_integration"
+            }
         elif state.action == "remove":
             script = f"""#!/usr/bin/env bash
 set -e
@@ -102,7 +105,10 @@ rm -rf /etc/monitoring-agent/
 
 echo "Monitoring agent removed successfully"
 """
-            return {"script": script, "source": "infra_agent_integration"}
+            return {
+                "script": script,
+                "source": "infra_agent_integration"
+            }
         elif state.action == "verify":
             script = f"""#!/usr/bin/env bash
 set -e
@@ -125,6 +131,11 @@ fi
 
 echo "Monitoring agent is installed and running"
 """
-            return {"script": script, "source": "infra_agent_integration"}
+            return {
+                "script": script,
+                "source": "infra_agent_integration"
+            }
         else:
-            return {"error": f"Unsupported action '{state.action}' for infrastructure agent integration"}
+            return {
+                "error": f"Unsupported action '{state.action}' for infrastructure agent integration"
+            }

@@ -5,6 +5,7 @@ import yaml
 from typing import Dict, Any, Optional
 from pathlib import Path
 
+# Default configuration paths to check
 DEFAULT_CONFIG_PATHS = [
     "./workflow_config.yaml",
     "./workflow_config.yml",
@@ -16,9 +17,12 @@ DEFAULT_CONFIG_PATHS = [
 def load_config_file(file_path: str) -> Dict[str, Any]:
     """Load configuration from a file."""
     path = Path(file_path).expanduser()
+    
     if not path.exists():
         raise FileNotFoundError(f"Configuration file not found: {file_path}")
+    
     content = path.read_text()
+    
     if file_path.endswith(('.yaml', '.yml')):
         try:
             return yaml.safe_load(content)
@@ -43,9 +47,11 @@ def find_default_config() -> Optional[str]:
 def merge_configs(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
     """Recursively merge two configuration dictionaries."""
     result = base.copy()
+    
     for key, value in override.items():
         if key in result and isinstance(result[key], dict) and isinstance(value, dict):
             result[key] = merge_configs(result[key], value)
         else:
             result[key] = value
+    
     return result

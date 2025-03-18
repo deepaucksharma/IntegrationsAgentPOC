@@ -26,7 +26,6 @@ setup(
             "shellcheck-py>=0.9.0.6"
         ],
     },
-    # Removed console entry point referencing non-existent module.
     entry_points={},
     classifiers=[
         "Development Status :: 4 - Beta",

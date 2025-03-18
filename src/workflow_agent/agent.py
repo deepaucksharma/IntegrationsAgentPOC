@@ -77,7 +77,7 @@ class WorkflowAgent:
         self.script_validator = self.workflow_config.script_validator or ScriptValidator()
         self.script_executor = self.workflow_config.script_executor or ScriptExecutor(
             self.history_manager, 
-            timeout=self.workflow_config.execution_timeout // 1000,  # Convert from ms to seconds
+            timeout=self.workflow_config.execution_timeout // 1000,  # Convert ms to seconds
             max_concurrent=self.workflow_config.max_concurrent_tasks,
             resource_limiter=resource_limiter
         )
@@ -214,11 +214,13 @@ class WorkflowAgent:
             if not isinstance(state.parameters, dict):
                 return {"error": "Invalid parameters: expected a dictionary."}
             
+            # Validate parameter schema if present
             if state.parameter_schema:
                 missing = []
                 for key, spec in state.parameter_schema.items():
                     if spec.required and key not in state.parameters:
                         missing.append(key)
+                
                 if missing:
                     return {"error": f"Missing required parameters: {', '.join(missing)}"}
             
@@ -229,10 +231,18 @@ class WorkflowAgent:
     async def initialize(self, config: Optional[Dict[str, Any]] = None) -> None:
         """Initialize the workflow agent."""
         try:
+            # Initialize database connection
             await self.history_manager.initialize(config)
+            
+            # Initialize recovery manager
             await self.recovery_manager.initialize(config)
+            
+            # Initialize script executor
             await self.script_executor.initialize(config)
+            
+            # Reload templates
             reload_templates()
+            
         except Exception as e:
             await self.cleanup()
             raise RuntimeError(f"Agent initialization failed: {str(e)}") from e
@@ -242,10 +252,13 @@ class WorkflowAgent:
         try:
             if hasattr(self, 'history_manager'):
                 await self.history_manager.cleanup()
+            
             if hasattr(self, 'script_executor'):
                 await self.script_executor.cleanup()
+            
             if hasattr(self, 'recovery_manager'):
                 await self.recovery_manager.cleanup()
+                
         except Exception as e:
             logger.error(f"Error during cleanup: {e}")
 

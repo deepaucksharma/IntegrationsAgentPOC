@@ -1,6 +1,6 @@
 """Core state definitions for workflow execution."""
 from typing import Any, Dict, List, Optional
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 class ParameterSpec:
     """Specification for a parameter."""
@@ -126,8 +126,10 @@ class WorkflowState:
             "execution_id": self.execution_id,
             "isolation_method": self.isolation_method
         }
+        
         if self.system_context:
             result["system_context"] = self.system_context
+        
         if self.changes:
             result["changes"] = [
                 {
@@ -139,8 +141,10 @@ class WorkflowState:
                 }
                 for c in self.changes
             ]
+        
         if self.legacy_changes:
             result["legacy_changes"] = self.legacy_changes
+        
         if self.metrics:
             result["metrics"] = {
                 "start_time": self.metrics.start_time,
@@ -149,12 +153,14 @@ class WorkflowState:
                 "cpu_usage": self.metrics.cpu_usage,
                 "memory_usage": self.metrics.memory_usage
             }
+        
         if self.output:
             result["output"] = {
                 "stdout": self.output.stdout,
                 "stderr": self.output.stderr,
                 "exit_code": self.output.exit_code
             }
+        
         if self.parameter_schema:
             result["parameter_schema"] = {
                 name: {
@@ -166,4 +172,5 @@ class WorkflowState:
                 }
                 for name, spec in self.parameter_schema.items()
             }
+        
         return result

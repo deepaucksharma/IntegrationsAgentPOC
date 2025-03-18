@@ -32,11 +32,14 @@ async def main():
         logger.info("No configuration file found, using defaults")
         config = {}
     
+    # Create and initialize agent
     agent = WorkflowAgent()
     
     try:
         logger.info("Initializing agent")
         await agent.initialize(config)
+        
+        # Wait for signal
         logger.info("Agent initialized and running")
         stop_event = asyncio.Event()
         
@@ -48,10 +51,15 @@ async def main():
             loop = asyncio.get_event_loop()
             for signame in ('SIGINT', 'SIGTERM'):
                 try:
-                    loop.add_signal_handler(getattr(signal, signame), signal_handler)
+                    loop.add_signal_handler(
+                        getattr(signal, signame),
+                        signal_handler
+                    )
                 except (NotImplementedError, AttributeError):
                     pass
+            
             await stop_event.wait()
+            
         except KeyboardInterrupt:
             logger.info("Keyboard interrupt received")
         

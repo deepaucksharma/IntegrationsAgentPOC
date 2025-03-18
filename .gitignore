@@ -1,0 +1,48 @@
+# Python
+*.pyc
+__pycache__/
+*.egg-info
+.pytest_cache/
+*.py[cod]
+*$py.class
+dist/
+build/
+*.egg
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*.swn
+.DS_Store
+
+# Virtual Environment
+venv/
+env/
+.env/
+.venv/
+ENV/
+
+# Coverage and testing
+.coverage
+coverage.xml
+htmlcov/
+.tox/
+nosetests.xml
+.hypothesis/
+
+# Logs and databases
+*.log
+workflow_history.db
+*.sqlite3
+*.db
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db

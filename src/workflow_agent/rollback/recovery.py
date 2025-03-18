@@ -67,9 +67,11 @@ class RecoveryManager:
         rollback_action = "remove" if state.action in ["install", "setup"] else "rollback"
         template_key = f"{state.target_name}-{rollback_action}"
         template_str = get_template(template_key)
+        
         if not template_str:
             default_key = f"default-{rollback_action}"
             template_str = get_template(default_key)
+        
         if not template_str or not template_str.strip():
             logger.info("No rollback template found, generating dynamic rollback script")
             template_str = """#!/usr/bin/env bash
@@ -84,9 +86,11 @@ echo "Executing: {{ cmd }}"
 
 echo "Rollback completed"
 """
+        
         with tempfile.TemporaryDirectory(prefix='workflow-rollback-') as temp_dir:
             script_id = str(uuid.uuid4())
             script_path = os.path.join(temp_dir, f"rollback-{script_id}.sh")
+            
             try:
                 tpl = Template(template_str)
                 rollback_script = tpl.render(
@@ -97,17 +101,22 @@ echo "Rollback completed"
                     rollback_commands=rollback_commands,
                     action=state.action
                 )
+                
                 with open(script_path, 'w') as f:
                     f.write(rollback_script)
                 os.chmod(script_path, 0o755)
+                
                 process = await asyncio.create_subprocess_exec(
                     script_path,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE
                 )
+                
                 try:
-                    stdout, stderr = await asyncio.wait_for(process.communicate(),
-                                                            timeout=workflow_config.execution_timeout / 1000)
+                    stdout, stderr = await asyncio.wait_for(
+                        process.communicate(),
+                        timeout=workflow_config.execution_timeout / 1000
+                    )
                     stdout_str = stdout.decode('utf-8')
                     stderr_str = stderr.decode('utf-8')
                     success = process.returncode == 0
@@ -120,6 +129,7 @@ echo "Rollback completed"
                     stderr_str = f"Rollback script execution timed out after {workflow_config.execution_timeout}ms"
                     logger.error(f"Rollback timed out: {stderr_str}")
                     return {"error": f"Rollback failed: {stderr_str}. Manual intervention may be required."}
+                
                 if self.history_manager:
                     try:
                         execution_id = await self.history_manager.save_execution(
@@ -137,6 +147,7 @@ echo "Rollback completed"
                         logger.info(f"Saved rollback execution with ID {execution_id}")
                     except Exception as e:
                         logger.error(f"Failed to save rollback execution record: {e}")
+                
                 logger.info("Rollback completed successfully")
                 return {
                     "status": "Rollback completed successfully",

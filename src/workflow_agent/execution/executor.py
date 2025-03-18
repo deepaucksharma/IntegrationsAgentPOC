@@ -24,18 +24,22 @@ class ResourceLimiter:
         self.active_executions = {}
         self._lock = asyncio.Lock()
     
-    async def acquire(self, execution_id: str) -> bool:
+    async def acquire(self, execution_id: str) -> None:
+        """Blocking acquire with no return value."""
         await self.semaphore.acquire()
         async with self._lock:
             self.active_executions[execution_id] = {"start_time": time.time()}
-        return True
     
     def release(self, execution_id: str) -> None:
+        """Release resources for execution."""
         try:
             self.semaphore.release()
         except ValueError:
+            # Handle case where semaphore might already be released
             pass
-        self.active_executions.pop(execution_id, None)
+        
+        if execution_id in self.active_executions:
+            self.active_executions.pop(execution_id, None)
 
 class ScriptExecutor:
     """Execute scripts with isolation and resource management."""
@@ -66,6 +70,7 @@ class ScriptExecutor:
             return {"error": "No script to run."}
         
         workflow_config = ensure_workflow_config(config or {})
+        
         temp_dir = tempfile.mkdtemp(prefix='workflow-')
         script_id = str(uuid.uuid4())
         script_path = os.path.join(temp_dir, f"script-{script_id}.sh")
@@ -74,14 +79,14 @@ class ScriptExecutor:
         execution_id = str(uuid.uuid4())
         
         try:
-            if not await self.resource_limiter.acquire(execution_id):
-                return {"error": "System resources exhausted, try again later."}
+            await self.resource_limiter.acquire(execution_id)
             
             with open(script_path, 'w') as f:
                 f.write(state.script)
             os.chmod(script_path, 0o755)
             
             start_time = time.time()
+            
             isolation_method = state.isolation_method or workflow_config.isolation_method
             use_isolation = workflow_config.use_isolation
             
@@ -96,7 +101,8 @@ class ScriptExecutor:
             
             success, stdout_str, stderr_str, exit_code, error_message = result
             end_time = time.time()
-            execution_time = int((end_time - start_time) * 1000)
+            execution_time_sec = end_time - start_time
+            execution_time = int(execution_time_sec * 1000)
             
             metrics = ExecutionMetrics(
                 start_time=start_time,
@@ -107,7 +113,7 @@ class ScriptExecutor:
             
             changes = state.changes.copy() if state.changes else []
             if success:
-                for line in stdout_str.lower().splitlines():
+                for line in stdout_str.lower().split('\n'):
                     if "installed package" in line:
                         changes.append(Change(
                             type="install",
@@ -122,6 +128,7 @@ class ScriptExecutor:
                             details="Created file from script",
                             revertible=True
                         ))
+                
                 if not changes:
                     if state.action in ["install", "setup"]:
                         changes.append(Change(
@@ -145,6 +152,7 @@ class ScriptExecutor:
                             revertible=False
                         ))
             
+            # Save to history
             try:
                 if self.history_manager:
                     record_id = await self.history_manager.save_execution(
@@ -181,6 +189,7 @@ class ScriptExecutor:
                     "execution_id": execution_id,
                     "transaction_id": transaction_id
                 }
+            
         except Exception as err:
             return {
                 "error": f"Script execution failed: {str(err)}",
@@ -194,5 +203,5 @@ class ScriptExecutor:
                     os.unlink(script_path)
                 if os.path.exists(temp_dir):
                     shutil.rmtree(temp_dir)
-            except Exception:
+            except:
                 pass
