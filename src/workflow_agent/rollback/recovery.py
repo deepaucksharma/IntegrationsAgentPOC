@@ -18,15 +18,5 @@ class RecoveryManager:
             await self.history_manager.cleanup()
 
     async def rollback_changes(self, state: WorkflowState, config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """
-        Handle rollback in case of script execution failure or verification failure.
-        Currently a placeholder that does no actual rollback.
-        """
-        if not state.error or (not state.changes and not state.legacy_changes):
-            logger.info("No changes to rollback.")
-            return {"status": "Nothing to rollback."}
-        
         logger.info(f"Attempting rollback for {state.target_name} due to error: {state.error}")
-        # In a real system, we might parse the changes and revert them.
-        logger.info("Rollback completed (no-op).")
-        return {"status": "Rollback completed successfully"}
+        return {"status": "Rollback completed successfully (no-op)"}

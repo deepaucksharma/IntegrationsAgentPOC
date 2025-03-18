@@ -20,6 +20,8 @@ from workflow_agent.utils.logging import setup_logging
 from workflow_agent.config.loader import load_config_file, find_default_config
 from workflow_agent.storage.knowledge_base import KnowledgeBase
 from workflow_agent.storage.history import HistoryManager
+from workflow_agent.verification.dynamic import DynamicVerificationBuilder
+from workflow_agent.rollback.recovery import RecoveryManager
 
 app = typer.Typer()
 logger = logging.getLogger("workflow-agent")
@@ -71,8 +73,8 @@ async def _install_flow(integration: str, license_key: str, host: str, config_pa
     await script_builder.initialize()
     await execution_agent.initialize()
     await improvement_agent.initialize()
+    await history_manager.initialize()
     
-    # Start the workflow
     state = {
         "action": "install",
         "target_name": integration,
@@ -80,6 +82,13 @@ async def _install_flow(integration: str, license_key: str, host: str, config_pa
         "parameters": {
             "license_key": license_key,
             "host": host
+        },
+        "system_context": {
+            "platform": {
+                "system": sys.platform,
+                "distribution": "", # TODO: Determine how to get this
+                "version": "" # TODO: Determine how to get this
+            }
         }
     }
     
@@ -107,7 +116,6 @@ async def _install_flow(integration: str, license_key: str, host: str, config_pa
                 typer.echo("Failed to start workflow")
             sys.exit(1)
     finally:
-        # Clean up
         await execution_agent.cleanup()
         await history_manager.cleanup()
 
@@ -151,12 +159,20 @@ async def _remove_flow(integration: str, config_path: Optional[str]):
     await script_builder.initialize()
     await execution_agent.initialize()
     await improvement_agent.initialize()
+    await history_manager.initialize()
     
     state = {
         "action": "remove",
         "target_name": integration,
         "integration_type": integration,
-        "parameters": {}
+        "parameters": {},
+        "system_context": {
+            "platform": {
+                "system": sys.platform,
+                "distribution": "", # TODO: Determine how to get this
+                "version": "" # TODO: Determine how to get this
+            }
+        }
     }
     
     try:
@@ -225,12 +241,20 @@ async def _verify_flow(integration: str, config_path: Optional[str]):
     await script_builder.initialize()
     await execution_agent.initialize()
     await improvement_agent.initialize()
+    await history_manager.initialize()
     
     state = {
         "action": "verify",
         "target_name": integration,
         "integration_type": integration,
-        "parameters": {}
+        "parameters": {},
+        "system_context": {
+            "platform": {
+                "system": sys.platform,
+                "distribution": "", # TODO: Determine how to get this
+                "version": "" # TODO: Determine how to get this
+            }
+        }
     }
     
     try:

@@ -1,4 +1,3 @@
-"""Module for fetching and parsing integration documentation."""
 import aiohttp
 from bs4 import BeautifulSoup
 from typing import Dict, Any, List
@@ -7,64 +6,26 @@ import logging
 logger = logging.getLogger(__name__)
 
 class DocumentationParser:
-    """Fetches and parses integration documentation from a given source."""
-    
+    """Fetches and parses integration documentation from New Relic."""
     def __init__(self, base_url: str = "https://docs.newrelic.com/install/"):
         self.base_url = base_url
 
     async def fetch_integration_docs(self, integration_type: str) -> Dict[str, Any]:
-        """Fetches documentation for the specified integration type.
-        
-        Args:
-            integration_type: The type of integration to fetch docs for
-            
-        Returns:
-            Dict containing structured knowledge from the documentation
-            
-        Raises:
-            Exception: If documentation fetch fails
-        """
         url = f"{self.base_url}{integration_type}/"
         logger.info(f"Fetching documentation from {url}")
-        
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url) as response:
-                    if response.status == 200:
-                        content = await response.text()
-                        return await self._extract_structured_knowledge(content)
-                    else:
-                        raise Exception(f"Failed to fetch documentation for {integration_type}. Status: {response.status}")
-        except aiohttp.ClientError as e:
-            logger.error(f"Network error fetching documentation: {e}")
-            raise
-        except Exception as e:
-            logger.error(f"Error processing documentation: {e}")
-            raise
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as response:
+                if response.status != 200:
+                    raise Exception(f"Failed to fetch docs: HTTP {response.status}")
+                content = await response.text()
+                return self._extract_structured_knowledge(content)
 
-    async def _extract_structured_knowledge(self, content: str) -> Dict[str, Any]:
-        """Extracts structured data from raw HTML content.
-        
-        Args:
-            content: Raw HTML content from documentation
-            
-        Returns:
-            Dict containing parsed knowledge structure
-        """
-        soup = BeautifulSoup(content, 'html.parser')
-        
-        # Extract prerequisites
+    def _extract_structured_knowledge(self, content: str) -> Dict[str, Any]:
+        soup = BeautifulSoup(content, 'lxml')
         prerequisites = self._extract_prerequisites(soup)
-        
-        # Extract installation methods
         installation_methods = self._extract_installation_methods(soup)
-        
-        # Extract configuration options
         config_options = self._extract_configuration_options(soup)
-        
-        # Extract verification steps
         verification_steps = self._extract_verification_steps(soup)
-        
         return {
             "prerequisites": prerequisites,
             "installation_methods": installation_methods,
@@ -73,77 +34,49 @@ class DocumentationParser:
         }
 
     def _extract_prerequisites(self, soup: BeautifulSoup) -> List[str]:
-        """Extract prerequisites from documentation."""
-        # Look for common prerequisite sections/headers
-        prereq_sections = soup.find_all(['div', 'section'], 
-                                      class_=lambda x: x and 'prerequisite' in x.lower())
+        prereq_sections = soup.find_all(lambda tag: tag.name in ['div','section'] and tag.get_text().lower().find("before you begin") != -1)
         prerequisites = []
         for section in prereq_sections:
-            items = section.find_all(['li', 'p'])
-            prerequisites.extend([item.get_text().strip() for item in items if item.get_text().strip()])
+            prerequisites.extend([item.get_text().strip() for item in section.find_all(['li','p'])])
         return prerequisites
 
     def _extract_installation_methods(self, soup: BeautifulSoup) -> List[Dict[str, Any]]:
-        """Extract available installation methods."""
         methods = []
-        # Look for installation method sections
-        install_sections = soup.find_all(['div', 'section'], 
-                                       class_=lambda x: x and 'installation' in x.lower())
-        
+        install_sections = soup.find_all(lambda tag: tag.name in ['div','section'] and tag.get_text().lower().find("installation") != -1)
         for section in install_sections:
-            method_name = section.find(['h2', 'h3', 'h4'])
-            if method_name:
-                steps = []
-                for step in section.find_all(['li', 'code']):
-                    step_text = step.get_text().strip()
-                    if step_text:
-                        steps.append(step_text)
-                        
+            header = section.find(['h2','h3','h4'])
+            if header:
+                steps = [step.get_text().strip() for step in section.find_all('li')]
                 methods.append({
-                    "name": method_name.get_text().strip(),
+                    "name": header.get_text().strip(),
                     "steps": steps,
                     "platform_compatibility": self._extract_platform_info(section)
                 })
-        
         return methods
 
+    def _extract_platform_info(self, section: BeautifulSoup) -> List[str]:
+        platforms = []
+        text = section.get_text().lower()
+        for os in ["windows", "linux", "macos"]:
+            if os in text:
+                platforms.append(os)
+        return platforms
+
     def _extract_configuration_options(self, soup: BeautifulSoup) -> Dict[str, str]:
-        """Extract configuration options and their requirements."""
         config_options = {}
-        config_sections = soup.find_all(['div', 'section'], 
-                                      class_=lambda x: x and 'configuration' in x.lower())
-        
+        config_sections = soup.find_all(lambda tag: tag.name in ['div','section'] and "configuration" in tag.get_text().lower())
         for section in config_sections:
-            # Look for configuration parameters in tables, lists, or paragraphs
-            for elem in section.find_all(['tr', 'li']):
-                option_name = elem.find(['th', 'strong', 'code'])
-                if option_name:
-                    name = option_name.get_text().strip()
-                    description = elem.get_text().strip()
-                    required = 'required' in description.lower()
-                    config_options[name] = "required" if required else "optional"
-        
+            for row in section.find_all('tr'):
+                cols = row.find_all(['th','td'])
+                if cols and len(cols) >= 2:
+                    option = cols[0].get_text().strip()
+                    desc = cols[1].get_text().strip()
+                    config_options[option] = "required" if "required" in desc.lower() else "optional"
         return config_options
 
     def _extract_verification_steps(self, soup: BeautifulSoup) -> List[str]:
-        """Extract verification steps from documentation."""
-        verify_sections = soup.find_all(['div', 'section'], 
-                                      class_=lambda x: x and ('verify' in x.lower() or 
-                                                            'validation' in x.lower()))
+        verify_sections = soup.find_all(lambda tag: tag.name in ['div','section'] and ("verify" in tag.get_text().lower() or "validation" in tag.get_text().lower()))
         steps = []
         for section in verify_sections:
-            items = section.find_all(['li', 'p', 'code'])
-            steps.extend([item.get_text().strip() for item in items if item.get_text().strip()])
+            steps.extend([item.get_text().strip() for item in section.find_all(['li','p','code'])])
         return steps
-
-    def _extract_platform_info(self, section: BeautifulSoup) -> List[str]:
-        """Extract platform compatibility information."""
-        platforms = []
-        platform_keywords = ['windows', 'linux', 'macos', 'ubuntu', 'centos', 'rhel']
-        text = section.get_text().lower()
-        
-        for platform in platform_keywords:
-            if platform in text:
-                platforms.append(platform)
-        
-        return platforms 

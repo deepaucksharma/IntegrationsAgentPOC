@@ -76,6 +76,13 @@ async def test_install_agent():
         "parameters": {
             "license_key": "test_license_key",
             "host": "test.host.local"
+        },
+        "system_context": {
+            "platform": {
+                "system": "linux",
+                "distribution": "ubuntu",
+                "version": "20.04"
+            }
         }
     }
     

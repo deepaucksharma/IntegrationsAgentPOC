@@ -53,23 +53,15 @@ class HistoryManager:
     async def _get_connection(self):
         async with self._lock:
             if not self.connection:
-                try:
-                    self.connection = sqlite3.connect(self.db_path)
-                    self.connection.row_factory = sqlite3.Row
-                except sqlite3.Error as e:
-                    logger.error(f"SQLite connection error: {e}")
-                    raise
+                self.connection = sqlite3.connect(self.db_path)
+                self.connection.row_factory = sqlite3.Row
             yield self.connection
 
     async def cleanup(self) -> None:
         async with self._lock:
             if self.connection:
-                try:
-                    self.connection.close()
-                except Exception as e:
-                    logger.error(f"Error closing SQLite connection: {e}")
-                finally:
-                    self.connection = None
+                self.connection.close()
+                self.connection = None
 
     async def save_execution(
         self,
