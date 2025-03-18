@@ -1,5 +1,8 @@
 # Workflow Agent
 
+![image](https://github.com/user-attachments/assets/add4a13a-f250-4c5a-a1cd-e4f561b285ed)
+
+
 A Python framework for orchestrating multi-step workflows with AI-driven adaptation and self-improvement capabilities, featuring dynamic documentation-based integration.
 
 ## Introduction
