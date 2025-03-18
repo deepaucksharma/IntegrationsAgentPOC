@@ -231,6 +231,18 @@
             "memory_available": 20659089408
           }
         }
+      },
+      {
+        "error": "Error generating script: Invalid configuration: WorkflowConfiguration.__init__() got an unexpected keyword argument 'docker_image'",
+        "root_cause": "no_output",
+        "timestamp": null,
+        "system_context": {
+          "platform": {
+            "system": "linux",
+            "distribution": "ubuntu",
+            "version": "20.04"
+          }
+        }
       }
     ],
     "successes": 0,

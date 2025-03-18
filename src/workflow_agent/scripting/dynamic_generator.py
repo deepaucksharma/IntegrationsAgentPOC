@@ -26,10 +26,9 @@ if [ "$EUID" -ne 0 ]; then
 fi
 """,
             },
-            "windows": {
-                "header": "# Windows installation script\nSet-ExecutionPolicy Bypass -Scope Process -Force\n",
+            "win32": {
+                "header": "# Windows PowerShell installation script\nSet-ExecutionPolicy Bypass -Scope Process -Force\n$ErrorActionPreference = \"Stop\"\n",
                 "error_handler": """
-$ErrorActionPreference = "Stop"
 trap {
     Write-Error $_
     exit 1
@@ -59,17 +58,29 @@ if (-not $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Adm
             lines.append(templates["check_admin"])
             lines.append("\n# Prerequisite Checks")
             for prereq in prereqs:
-                lines.append(f"echo 'Checking prerequisite: {prereq}'")
+                if system == "win32":
+                    lines.append(f"Write-Host 'Checking prerequisite: {prereq}'")
+                else:
+                    lines.append(f"echo 'Checking prerequisite: {prereq}'")
             lines.append("\n# Installation Steps")
             for i, step in enumerate(method.get("steps", []), 1):
                 cleaned = self._clean_step(step)
-                lines.append(f"\necho 'Step {i}: {cleaned}'")
+                if system == "win32":
+                    lines.append(f"\nWrite-Host 'Step {i}: {cleaned}'")
+                    # Convert Linux commands to PowerShell
+                    cleaned = self._convert_to_powershell(cleaned)
+                else:
+                    lines.append(f"\necho 'Step {i}: {cleaned}'")
                 lines.append(cleaned)
             lines.append("\n# Verification Steps")
             verify_steps = state.template_data.get("docs", {}).get("verification_steps", [])
             for step in verify_steps:
                 cleaned = self._clean_step(step)
-                lines.append(f"\necho 'Verifying: {cleaned}'")
+                if system == "win32":
+                    lines.append(f"\nWrite-Host 'Verifying: {cleaned}'")
+                    cleaned = self._convert_to_powershell(cleaned)
+                else:
+                    lines.append(f"\necho 'Verifying: {cleaned}'")
                 lines.append(cleaned)
             script = "\n".join(lines)
             logger.info("Installation script generated successfully")
@@ -79,9 +90,32 @@ if (-not $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Adm
             return {"error": str(e)}
 
     def _clean_step(self, step: str) -> str:
-        step = step.strip().replace("```", "").replace("`", "")
-        while "(" in step and ")" in step:
-            start = step.find("(")
-            end = step.find(")") + 1
-            step = step[:start].strip() + step[end:].strip()
-        return step
+        """Clean and sanitize a script step."""
+        if isinstance(step, dict):
+            return step.get("command", "")
+        return str(step).strip()
+
+    def _convert_to_powershell(self, command: str) -> str:
+        """Convert Linux shell commands to PowerShell commands."""
+        # Basic command conversions
+        conversions = {
+            "mkdir -p": "New-Item -ItemType Directory -Force -Path",
+            "rm -rf": "Remove-Item -Recurse -Force",
+            "echo": "Write-Host",
+            "sleep": "Start-Sleep -Seconds",
+            "test -d": "Test-Path -PathType Container",
+            "test -f": "Test-Path -PathType Leaf",
+            "grep": "Select-String -Pattern",
+            ">": "| Out-File -FilePath",
+            ">>": "| Add-Content -Path"
+        }
+        
+        result = command
+        for linux_cmd, ps_cmd in conversions.items():
+            result = result.replace(linux_cmd, ps_cmd)
+            
+        # Convert paths
+        if "/opt/" in result:
+            result = result.replace("/opt/", "C:\\Program Files\\")
+            
+        return result

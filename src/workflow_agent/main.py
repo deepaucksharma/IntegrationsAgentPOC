@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Main entry point for workflow agent with multi-agent system.
+Main entry point for workflow agent with multi-agent system and documentation-based intelligence.
 """
 import os
 import sys
@@ -22,6 +22,7 @@ from workflow_agent.storage.knowledge_base import KnowledgeBase
 from workflow_agent.storage.history import HistoryManager
 from workflow_agent.verification.dynamic import DynamicVerificationBuilder
 from workflow_agent.rollback.recovery import RecoveryManager
+from workflow_agent.utils.system import get_system_context
 
 app = typer.Typer()
 logger = logging.getLogger("workflow-agent")
@@ -75,22 +76,20 @@ async def _install_flow(integration: str, license_key: str, host: str, config_pa
     await improvement_agent.initialize()
     await history_manager.initialize()
     
-    state = {
-        "action": "install",
-        "target_name": integration,
-        "integration_type": integration,
-        "parameters": {
+    # Create initial state
+    from workflow_agent.core.state import WorkflowState
+    system_context = get_system_context()
+    
+    state = WorkflowState(
+        action="install",
+        target_name=integration,
+        integration_type=integration,
+        parameters={
             "license_key": license_key,
             "host": host
         },
-        "system_context": {
-            "platform": {
-                "system": sys.platform,
-                "distribution": "", # TODO: Determine how to get this
-                "version": "" # TODO: Determine how to get this
-            }
-        }
-    }
+        system_context=system_context
+    )
     
     try:
         result = await coordinator.start_workflow(state, config)
@@ -98,10 +97,9 @@ async def _install_flow(integration: str, license_key: str, host: str, config_pa
         
         if workflow_id:
             logger.info(f"Started workflow with ID: {workflow_id}")
-            # Convert milliseconds to seconds for timeout
             final_result = await coordinator.wait_for_completion(
                 workflow_id,
-                timeout=config.get("execution_timeout", 300)/1000
+                timeout=config.get("execution_timeout", 300)  # Use timeout directly in seconds
             )
             
             if "error" in final_result:

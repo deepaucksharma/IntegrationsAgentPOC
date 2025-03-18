@@ -4,7 +4,7 @@ configurable:
   custom_template_dir: null
   use_isolation: false
   isolation_method: "direct"
-  execution_timeout: 30000
+  execution_timeout: 300
   skip_verification: false
   rule_based_optimization: true
   use_static_analysis: true

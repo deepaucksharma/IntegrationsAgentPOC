@@ -33,14 +33,23 @@ class CoordinatorAgent:
         await self.message_bus.subscribe("verification_complete", self._handle_verification_complete)
         await self.message_bus.subscribe("error", self._handle_error)
     
-    async def start_workflow(self, input_state: Dict[str, Any], config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    async def start_workflow(self, input_state: Dict[str, Any] | WorkflowState, config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Start a new workflow based on the input state."""
         workflow_id = str(uuid.uuid4())
         
-        if "transaction_id" not in input_state:
-            input_state["transaction_id"] = workflow_id
         try:
-            state = WorkflowState(**input_state)
+            if isinstance(input_state, dict):
+                if "transaction_id" not in input_state:
+                    input_state["transaction_id"] = workflow_id
+                state = WorkflowState(**input_state)
+            else:
+                state = input_state
+                if not state.transaction_id:
+                    # Create a new state with the workflow_id as transaction_id
+                    state_dict = state.dict()
+                    state_dict["transaction_id"] = workflow_id
+                    state = WorkflowState(**state_dict)
+                
             if not state.system_context:
                 state.system_context = get_system_context()
         except Exception as e:

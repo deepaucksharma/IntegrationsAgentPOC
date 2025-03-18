@@ -1,0 +1,39 @@
+# PowerShell common macros
+
+{% macro setup_logging() %}
+function Write-Log {
+    param(
+        [string]$Level,
+        [string]$Message
+    )
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    Write-Host "[$timestamp] $Level - $Message"
+}
+
+function Write-Info {
+    param([string]$Message)
+    Write-Log -Level "INFO" -Message $Message
+}
+
+function Write-Error {
+    param([string]$Message)
+    Write-Log -Level "ERROR" -Message $Message
+    throw $Message
+}
+{% endmacro %}
+
+{% macro error_handling() %}
+trap {
+    Write-Error "An error occurred: $_"
+    exit 1
+}
+{% endmacro %}
+
+{% macro check_prerequisites() %}
+# Check if running as administrator
+$isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+if (-not $isAdmin) {
+    Write-Error "This script must be run as Administrator"
+    exit 1
+}
+{% endmacro %} 
