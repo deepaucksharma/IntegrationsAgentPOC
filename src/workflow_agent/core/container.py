@@ -16,6 +16,7 @@ from ..strategy.installation import InstallationStrategyAgent
 from ..rollback.recovery import RecoveryManager
 from ..storage.history import ExecutionHistoryManager
 from ..config.configuration import WorkflowConfiguration
+from ..integrations.manager import IntegrationManager
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +43,7 @@ class DependencyContainer:
             'platform_manager': set(),
             'resource_manager': set(),
             'history_manager': set(),
+            'integration_manager': set(),
             'script_executor': {'platform_manager', 'resource_manager'},
             'script_generator': {'history_manager'},
             'script_validator': set(),
@@ -59,6 +61,10 @@ class DependencyContainer:
             self.register('platform_manager', PlatformManager())
             self.register('resource_manager', ResourceManager())
             self.register('history_manager', ExecutionHistoryManager())
+            
+            # Register integration manager
+            if self.config and hasattr(self.config, 'plugin_dirs'):
+                self.register('integration_manager', IntegrationManager(self.config.plugin_dirs))
             
             # Register execution components
             self.register('script_executor', ScriptExecutor(

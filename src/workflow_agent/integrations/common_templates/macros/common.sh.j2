@@ -87,3 +87,38 @@ check_command() {
     fi
 }
 {% endmacro %}
+
+# Common bash macros for error handling and logging
+
+function log_message() {
+    local level=$1
+    local message=$2
+    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    echo "$timestamp [$level] $message"
+}
+
+function handle_error() {
+    local message=$1
+    log_message "ERROR" "$message"
+    exit 1
+}
+
+function check_prerequisites() {
+    local required_tools=("$@")
+    for tool in "${required_tools[@]}"; do
+        if ! command -v "$tool" &> /dev/null; then
+            handle_error "Required tool not found: $tool"
+        fi
+    done
+}
+
+{% macro setup_logging() %}
+LOG_FILE="/var/log/integration_install.log"
+exec 1> >(tee -a "$LOG_FILE")
+exec 2>&1
+{% endmacro %}
+
+{% macro error_handling() %}
+set -e
+trap 'echo "Error on line $LINENO"' ERR
+{% endmacro %}

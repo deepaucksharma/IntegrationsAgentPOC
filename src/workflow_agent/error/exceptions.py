@@ -35,24 +35,17 @@ class ErrorContext:
 
 class WorkflowError(Exception):
     """Base exception for workflow errors."""
-    def __init__(
-        self, 
-        message: str, 
-        error_code: ErrorCode,
-        context: Optional[ErrorContext] = None,
-        details: Optional[Dict[str, Any]] = None
-    ):
-        self.message = message
+    
+    def __init__(self, message: str, error_code: str = "WORKFLOW_ERROR", details: Optional[Dict[str, Any]] = None):
+        super().__init__(message)
         self.error_code = error_code
-        self.context = context or ErrorContext()
-        self.context.details = details or {}
-        super().__init__(f"{error_code.value}: {message}")
+        self.details = details or {}
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert error to dictionary format."""
         return {
             "error": self.message,
-            "error_code": self.error_code.value,
+            "error_code": self.error_code,
             "timestamp": self.context.timestamp.isoformat(),
             "component": self.context.component,
             "operation": self.context.operation,
@@ -72,75 +65,76 @@ class WorkflowError(Exception):
         )
         return cls(
             message=data["error"],
-            error_code=ErrorCode(data["error_code"]),
-            context=context
+            error_code=data["error_code"],
+            details=data["details"]
         )
 
 class ValidationError(WorkflowError):
     """Raised when validation fails."""
     def __init__(self, message: str, context: Optional[ErrorContext] = None, details: Optional[Dict[str, Any]] = None):
-        super().__init__(message, ErrorCode.VALIDATION_ERROR, context, details)
+        super().__init__(message, ErrorCode.VALIDATION_ERROR.value, details)
 
 class ExecutionError(WorkflowError):
     """Raised when script execution fails."""
     def __init__(self, message: str, context: Optional[ErrorContext] = None, details: Optional[Dict[str, Any]] = None):
-        super().__init__(message, ErrorCode.EXECUTION_ERROR, context, details)
+        super().__init__(message, ErrorCode.EXECUTION_ERROR.value, details)
 
 class ConfigurationError(WorkflowError):
     """Raised when configuration is invalid."""
     def __init__(self, message: str, context: Optional[ErrorContext] = None, details: Optional[Dict[str, Any]] = None):
-        super().__init__(message, ErrorCode.CONFIGURATION_ERROR, context, details)
+        super().__init__(message, ErrorCode.CONFIGURATION_ERROR.value, details)
 
 class ResourceError(WorkflowError):
     """Raised when resource management fails."""
     def __init__(self, message: str, context: Optional[ErrorContext] = None, details: Optional[Dict[str, Any]] = None):
-        super().__init__(message, ErrorCode.RESOURCE_ERROR, context, details)
+        super().__init__(message, ErrorCode.RESOURCE_ERROR.value, details)
 
 class SecurityError(WorkflowError):
     """Raised when security checks fail."""
     def __init__(self, message: str, context: Optional[ErrorContext] = None, details: Optional[Dict[str, Any]] = None):
-        super().__init__(message, ErrorCode.SECURITY_ERROR, context, details)
+        super().__init__(message, ErrorCode.SECURITY_ERROR.value, details)
 
 class TimeoutError(WorkflowError):
     """Raised when operations timeout."""
     def __init__(self, message: str, context: Optional[ErrorContext] = None, details: Optional[Dict[str, Any]] = None):
-        super().__init__(message, ErrorCode.TIMEOUT_ERROR, context, details)
+        super().__init__(message, ErrorCode.TIMEOUT_ERROR.value, details)
 
 class RollbackError(WorkflowError):
     """Raised when rollback operations fail."""
     def __init__(self, message: str, context: Optional[ErrorContext] = None, details: Optional[Dict[str, Any]] = None):
-        super().__init__(message, ErrorCode.ROLLBACK_ERROR, context, details)
+        super().__init__(message, ErrorCode.ROLLBACK_ERROR.value, details)
 
 class PlatformError(WorkflowError):
     """Raised when platform-specific operations fail."""
     def __init__(self, message: str, context: Optional[ErrorContext] = None, details: Optional[Dict[str, Any]] = None):
-        super().__init__(message, ErrorCode.PLATFORM_ERROR, context, details)
+        super().__init__(message, ErrorCode.PLATFORM_ERROR.value, details)
 
 class StateError(WorkflowError):
     """Raised when state operations fail."""
     def __init__(self, message: str, context: Optional[ErrorContext] = None, details: Optional[Dict[str, Any]] = None):
-        super().__init__(message, ErrorCode.STATE_ERROR, context, details)
+        super().__init__(message, ErrorCode.STATE_ERROR.value, details)
 
 class DatabaseError(WorkflowError):
     """Raised when database operations fail."""
     def __init__(self, message: str, context: Optional[ErrorContext] = None, details: Optional[Dict[str, Any]] = None):
-        super().__init__(message, ErrorCode.DATABASE_ERROR, context, details)
+        super().__init__(message, ErrorCode.DATABASE_ERROR.value, details)
 
 class TemplateError(WorkflowError):
     """Raised when template operations fail."""
     def __init__(self, message: str, context: Optional[ErrorContext] = None, details: Optional[Dict[str, Any]] = None):
-        super().__init__(message, ErrorCode.TEMPLATE_ERROR, context, details)
+        super().__init__(message, ErrorCode.TEMPLATE_ERROR.value, details)
 
 class ScriptError(WorkflowError):
     """Raised when script generation or validation fails."""
     def __init__(self, message: str, context: Optional[ErrorContext] = None, details: Optional[Dict[str, Any]] = None):
-        super().__init__(message, ErrorCode.SCRIPT_ERROR, context, details)
+        super().__init__(message, ErrorCode.SCRIPT_ERROR.value, details)
 
 class DocumentationFetchError(WorkflowError):
     """Raised when documentation fetching or parsing operations fail."""
     def __init__(self, message: str, context: Optional[ErrorContext] = None, details: Optional[Dict[str, Any]] = None):
-        super().__init__(message, ErrorCode.DOCUMENTATION_ERROR, context, details)
+        super().__init__(message, ErrorCode.DOCUMENTATION_ERROR.value, details)
 
-class InitializationError(Exception):
+class InitializationError(WorkflowError):
     """Exception raised when initialization fails."""
-    pass
+    def __init__(self, message: str, details: Optional[Dict[str, Any]] = None):
+        super().__init__(message, error_code=ErrorCode.INITIALIZATION_ERROR.value, details=details)

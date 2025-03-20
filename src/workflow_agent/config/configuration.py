@@ -28,8 +28,8 @@ dangerous_patterns = [
 class WorkflowConfiguration(BaseModel):
     """Configuration for workflow agent with enhanced validation."""
     
-    user_id: str = Field(default="default_user", description="User identifier")
-    template_dir: Path = Field(default="./templates", description="Main template directory")
+    user_id: str = Field(default="test_user", description="User identifier")
+    template_dir: Path = Field(default="./src/workflow_agent/integrations/common_templates", description="Main template directory")
     custom_template_dir: Optional[Path] = Field(default=None, description="Custom template directory")
     use_isolation: bool = Field(default=False, description="Whether to use isolation")
     isolation_method: str = Field(default="direct", description="Isolation method to use")
@@ -37,14 +37,15 @@ class WorkflowConfiguration(BaseModel):
     skip_verification: bool = Field(default=False, description="Skip verification steps")
     rule_based_optimization: bool = Field(default=True, description="Use rule-based optimization")
     use_static_analysis: bool = Field(default=True, description="Use static analysis")
-    db_connection_string: str = Field(default="workflow_history.db", description="Database connection string")
+    db_connection_string: str = Field(default="./workflow_history.db", description="Database connection string")
     prune_history_days: int = Field(default=90, description="Days to keep history", ge=1)
-    plugin_dirs: List[Path] = Field(default_factory=lambda: [Path("plugins")], description="Plugin directories")
+    plugin_dirs: List[Path] = Field(default_factory=lambda: [Path("./plugins")], description="Plugin directories")
     max_concurrent_tasks: int = Field(default=5, description="Maximum concurrent tasks", ge=1, le=100)
     least_privilege_execution: bool = Field(default=True, description="Use least privilege execution")
-    log_level: str = Field(default="INFO", description="Logging level")
+    log_level: str = Field(default="DEBUG", description="Logging level")
     docs_cache_dir: Optional[Path] = Field(default="./cache/docs", description="Documentation cache directory")
     docs_cache_ttl: int = Field(default=86400, description="Documentation cache TTL in seconds", ge=1)
+    use_recovery: bool = Field(default=True, description="Use recovery")
 
     @validator("isolation_method")
     def validate_isolation_method(cls, value: str) -> str:

@@ -14,4 +14,6 @@ configurable:
     - "./plugins"
   max_concurrent_tasks: 5
   least_privilege_execution: true
-  log_level: "DEBUG" 
+  log_level: "DEBUG"
+  docs_cache_dir: "./cache/docs"
+  docs_cache_ttl: 86400

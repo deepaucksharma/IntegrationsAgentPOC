@@ -1,4 +1,34 @@
-# PowerShell common macros
+# Common PowerShell macros for error handling and logging
+
+function log_message {
+    param(
+        [string]$level,
+        [string]$message
+    )
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    $logMessage = "$timestamp [$level] $message"
+    Write-Host $logMessage
+    Add-Content -Path $LOG_FILE -Value $logMessage
+}
+
+function handle_error {
+    param(
+        [string]$message
+    )
+    log_message "ERROR" $message
+    throw $message
+}
+
+function check_prerequisites {
+    param(
+        [string[]]$required_tools
+    )
+    foreach ($tool in $required_tools) {
+        if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) {
+            handle_error "Required tool not found: $tool"
+        }
+    }
+}
 
 {% macro setup_logging() %}
 function Write-Log {

@@ -14,13 +14,14 @@ class ScriptGenerator:
         self.history_manager = history_manager
 
     async def generate_script(self, state: WorkflowState, config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        if not state.template_path:
+        template_path = state.template_data.get("template_path")
+        if not template_path:
             return {"error": "No template path provided by integration."}
         
         workflow_config = ensure_workflow_config(config or {})
-        template_full_path = Path(state.template_path)
+        template_full_path = Path(template_path)
         if not template_full_path.is_absolute():
-            template_full_path = (Path(".") / state.template_path).resolve()
+            template_full_path = (Path(".") / template_path).resolve()
         
         # Define all possible template directories
         template_dirs = [
@@ -52,7 +53,7 @@ class ScriptGenerator:
                 target_name=state.target_name,
                 parameters=state.parameters,
                 template_data=state.template_data or {},
-                verification_data=state.verification_data or {}
+                verification_data=state.template_data.get("verification", {})
             )
             return {"script": script}
         except Exception as e:

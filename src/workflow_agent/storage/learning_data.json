@@ -286,5 +286,10 @@
     ],
     "successes": 0,
     "improvements": []
+  },
+  "infra_agent_infrastructure-agent_install": {
+    "failures": [],
+    "successes": 1,
+    "improvements": []
   }
 }

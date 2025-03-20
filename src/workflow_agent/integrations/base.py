@@ -5,10 +5,42 @@ import logging
 import yaml
 from pathlib import Path
 from typing import Dict, Any, Optional, List
+from abc import ABC, abstractmethod
 
 from ..core.state import WorkflowState
 
 logger = logging.getLogger(__name__)
+
+class BaseIntegration(ABC):
+    """Base class for all integration plugins."""
+    
+    def __init__(self):
+        self.name: str = ""
+        self.version: str = ""
+        self.description: str = ""
+        
+    @abstractmethod
+    async def install(self, parameters: Dict[str, Any]) -> Dict[str, Any]:
+        """Install the integration."""
+        pass
+        
+    @abstractmethod
+    async def verify(self, parameters: Dict[str, Any]) -> Dict[str, Any]:
+        """Verify the integration installation."""
+        pass
+        
+    @abstractmethod
+    async def uninstall(self, parameters: Dict[str, Any]) -> Dict[str, Any]:
+        """Uninstall the integration."""
+        pass
+        
+    def get_info(self) -> Dict[str, str]:
+        """Get integration information."""
+        return {
+            "name": self.name,
+            "version": self.version,
+            "description": self.description
+        }
 
 class IntegrationBase:
     """

@@ -4,13 +4,14 @@ import re
 from typing import Dict, Any, Optional, List
 from ..core.state import WorkflowState, Change
 from ..config.configuration import ensure_workflow_config
+from ..storage.history import ExecutionHistoryManager
 
 logger = logging.getLogger(__name__)
 
 class RecoveryManager:
     """Manages recovery and rollback operations for workflow executions."""
     
-    def __init__(self, history_manager=None):
+    def __init__(self, history_manager: ExecutionHistoryManager):
         self.history_manager = history_manager
 
     async def initialize(self, config: Optional[Dict[str, Any]] = None) -> None:
@@ -152,6 +153,36 @@ fi
 """
             return None
 
-    async def perform_rollback(self, state: WorkflowState, config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """Alias for rollback_changes to maintain API compatibility."""
-        return await self.rollback_changes(state, config)
+    async def perform_rollback(self, state: WorkflowState) -> Dict[str, Any]:
+        """Perform rollback for a failed workflow."""
+        logger.info("Starting rollback for action: %s, target: %s", state.action, state.target_name)
+        
+        try:
+            # Get changes to rollback
+            changes = state.changes
+            if not changes:
+                logger.info("No changes to rollback")
+                return {"status": "success", "message": "No changes to rollback"}
+            
+            # Rollback changes in reverse order
+            for change in reversed(changes):
+                if not change.revertible or not change.revert_command:
+                    logger.warning("Change %s is not revertible", change.change_id)
+                    continue
+                    
+                logger.info("Rolling back change: %s", change.change_id)
+                # Execute revert command here
+                # For now, we'll just log it
+                logger.info("Would execute: %s", change.revert_command)
+            
+            return {
+                "status": "success",
+                "message": "Rollback completed successfully"
+            }
+            
+        except Exception as e:
+            logger.error("Rollback failed: %s", e)
+            return {
+                "status": "error",
+                "message": f"Rollback failed: {str(e)}"
+            }

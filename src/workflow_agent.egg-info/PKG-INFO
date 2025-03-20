@@ -1,4 +1,4 @@
-Metadata-Version: 2.2
+Metadata-Version: 2.4
 Name: workflow-agent
 Version: 0.3.0
 Summary: A Python framework for orchestrating multi-step workflows with AI-driven adaptation
