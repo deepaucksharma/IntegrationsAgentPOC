@@ -149,3 +149,31 @@ End of document.
 See the [Developer Setup & Troubleshooting](developer-readme.md) guide for more detailed instructions.
 
 ![image](https://github.com/user-attachments/assets/add4a13a-f250-4c5a-a1cd-e4f561b285ed)
+
+## API Key Configuration
+
+The workflow agent supports LLM-based script generation which requires an OpenAI API key. There are two ways to provide the API key:
+
+1. **Environment Variable (Recommended)**
+   ```bash
+   export OPENAI_API_KEY=your_api_key_here
+   ```
+
+2. **Configuration File**
+   ```yaml
+   # workflow_config.yaml
+   openai_api_key: your_api_key_here
+   ```
+
+The environment variable takes precedence over the configuration file. If no API key is provided, the system will fall back to template-based script generation.
+
+### API Key Priority Order
+1. Environment variable (`OPENAI_API_KEY`)
+2. Configuration file (`openai_api_key` in workflow_config.yaml)
+3. Fallback to template-based generation if no key is available
+
+For security best practices:
+- Use environment variables in production environments
+- Never commit API keys to version control
+- Use separate API keys for development and production
+- Rotate API keys periodically
