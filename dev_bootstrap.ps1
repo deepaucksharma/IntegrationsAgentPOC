@@ -15,11 +15,133 @@ $TEMPLATE_DIRS = @(
     ".\src\workflow_agent\integrations\common_templates\verify",
     ".\src\workflow_agent\integrations\common_templates\macros"
 )
+
+# More realistic mock template content
 $MOCK_TEMPLATE_CONTENT = @"
 #!/bin/bash
-echo "Mock template for testing"
-exit 0
+set -e
+
+# Common functions
+log_message() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"
+}
+
+log_error() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] ERROR: $1" >&2
+}
+
+# Prerequisites check
+check_prerequisites() {
+    log_message "Checking prerequisites..."
+    if ! command -v curl &> /dev/null; then
+        log_error "curl is required but not installed"
+        exit 1
+    fi
+    if ! command -v jq &> /dev/null; then
+        log_error "jq is required but not installed"
+        exit 1
+    fi
+}
+
+# Installation steps
+install() {
+    log_message "Starting installation..."
+    check_prerequisites
+    
+    # Download and install
+    log_message "Downloading package..."
+    curl -sL https://example.com/package.tar.gz -o /tmp/package.tar.gz
+    
+    log_message "Extracting package..."
+    tar xzf /tmp/package.tar.gz -C /opt
+    
+    # Configure
+    log_message "Configuring..."
+    cat > /etc/config.json << EOF
+{
+    "license_key": "{{ license_key }}",
+    "host": "{{ host }}",
+    "port": {{ port }},
+    "log_level": "{{ log_level }}"
+}
+EOF
+    
+    # Start service
+    log_message "Starting service..."
+    systemctl enable service-name
+    systemctl start service-name
+    
+    # Cleanup
+    rm -f /tmp/package.tar.gz
+}
+
+# Verification steps
+verify() {
+    log_message "Verifying installation..."
+    
+    # Check service status
+    if ! systemctl is-active --quiet service-name; then
+        log_error "Service is not running"
+        exit 1
+    fi
+    
+    # Check configuration
+    if ! jq -e '.license_key' /etc/config.json > /dev/null; then
+        log_error "Invalid configuration"
+        exit 1
+    fi
+    
+    # Check connectivity
+    if ! curl -s http://localhost:{{ port }}/health > /dev/null; then
+        log_error "Service is not responding"
+        exit 1
+    fi
+    
+    log_message "Verification successful"
+}
+
+# Main execution
+case "$1" in
+    install)
+        install
+        ;;
+    verify)
+        verify
+        ;;
+    *)
+        log_error "Unknown command: $1"
+        exit 1
+        ;;
+esac
+
+log_message "Operation completed successfully"
 "@
+
+# Function to clean up mock templates
+function Remove-MockTemplates {
+    foreach ($dir in $TEMPLATE_DIRS) {
+        $templateFile = Join-Path $dir "mock_template.sh"
+        if (Test-Path $templateFile) {
+            Remove-Item -Path $templateFile -Force
+            Write-Host "Removed mock template: $templateFile" -ForegroundColor Gray
+        }
+    }
+}
+
+# Function to create mock templates
+function Create-MockTemplates {
+    foreach ($dir in $TEMPLATE_DIRS) {
+        if (-not (Test-Path $dir)) {
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+            Write-Host "Created directory: $dir" -ForegroundColor Gray
+        }
+        
+        # Create mock template files
+        $templateFile = Join-Path $dir "mock_template.sh"
+        Set-Content -Path $templateFile -Value $MOCK_TEMPLATE_CONTENT
+        Write-Host "Created mock template: $templateFile" -ForegroundColor Gray
+    }
+}
 
 # Create workflow configuration
 $WORKFLOW_CONFIG = @"
@@ -79,21 +201,6 @@ function Test-PythonVersion {
     }
     catch {
         return $false
-    }
-}
-
-# Function to create mock templates
-function Create-MockTemplates {
-    foreach ($dir in $TEMPLATE_DIRS) {
-        if (-not (Test-Path $dir)) {
-            New-Item -ItemType Directory -Path $dir -Force | Out-Null
-            Write-Host "Created directory: $dir" -ForegroundColor Gray
-        }
-        
-        # Create mock template files
-        $templateFile = Join-Path $dir "mock_template.sh"
-        Set-Content -Path $templateFile -Value $MOCK_TEMPLATE_CONTENT
-        Write-Host "Created mock template: $templateFile" -ForegroundColor Gray
     }
 }
 
@@ -261,9 +368,15 @@ try {
     else {
         Write-Host "`nAll tests completed successfully!" -ForegroundColor Green
     }
+
+    # Clean up mock templates after tests
+    Write-Host "`nCleaning up mock templates..." -ForegroundColor Yellow
+    Remove-MockTemplates
+    
 }
 catch {
-    Write-Host "`nError during setup/testing: $_" -ForegroundColor Red
-    Write-Host "Stack trace: $($_.ScriptStackTrace)" -ForegroundColor Red
-    exit 1
+    # Clean up mock templates on error
+    Write-Host "`nCleaning up mock templates after error..." -ForegroundColor Yellow
+    Remove-MockTemplates
+    throw
 } 

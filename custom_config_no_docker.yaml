@@ -1,6 +1,6 @@
 configurable:
   user_id: "test_user"
-  template_dir: "./integrations/common_templates"
+  template_dir: "${WORKSPACE_ROOT}/integrations/common_templates"
   custom_template_dir: null
   use_isolation: false
   isolation_method: "direct"
@@ -11,7 +11,7 @@ configurable:
   db_connection_string: "workflow_history.db"
   prune_history_days: 90
   plugin_dirs:
-    - "./plugins"
+    - "${WORKSPACE_ROOT}/plugins"
   max_concurrent_tasks: 5
   least_privilege_execution: true
   log_level: "DEBUG" 
