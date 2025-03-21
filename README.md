@@ -10,25 +10,13 @@ This documentation is structured across several focused README files:
 4.  **[Data Flow](data-flow-readme.md)**: Information flow throughout the workflow lifecycle
 5.  **[Developer Setup & Troubleshooting](developer-readme.md)**: Setup instructions, common issues, and debugging tips
 
-## Workflow Example
+## Agentic Workflow 
 
-The following demonstrates a typical workflow for installing a monitoring agent:
+The following demonstrates a typical workflow with agents :
 
-```
-+----------------+    +-------------------+    +--------------------+
-| Initial Request |--->| Knowledge Retrieval |--->| Strategy Selection |
-+----------------+    +-------------------+    +--------------------+
-                                                          |
-+----------------+    +------------------+    +------------v--------+
-| Verification    |<---| Script Execution |<---| Script Generation  |
-+----------------+    +------------------+    +-------------------+
-        |
-        v
-+----------------+
-| Success/Failure |
-+----------------+
-```
 
+
+![Agentic](https://github.com/user-attachments/assets/91c86266-b490-4360-9c92-d6a29b93802e)
 
 ---
 
