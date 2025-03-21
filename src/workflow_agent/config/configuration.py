@@ -46,6 +46,17 @@ class WorkflowConfiguration(BaseModel):
     docs_cache_dir: Optional[Path] = Field(default="./cache/docs", description="Documentation cache directory")
     docs_cache_ttl: int = Field(default=86400, description="Documentation cache TTL in seconds", ge=1)
     use_recovery: bool = Field(default=True, description="Use recovery")
+    llm_provider: str = Field(default="openai", description="LLM provider to use (openai or gemini)")
+    openai_api_key: Optional[str] = Field(default=None, description="OpenAI API key")
+    gemini_api_key: Optional[str] = Field(default=None, description="Google Gemini API key")
+    error_handling: Dict[str, Any] = Field(
+        default_factory=lambda: {
+            "continue_on_error": False,
+            "max_retries": 3,
+            "retry_delay": 5
+        },
+        description="Error handling configuration"
+    )
 
     @validator("isolation_method")
     def validate_isolation_method(cls, value: str) -> str:
@@ -84,6 +95,14 @@ class WorkflowConfiguration(BaseModel):
             return value.resolve()
         raise ValueError(f"Invalid path value: {value}")
 
+    @validator("llm_provider")
+    def validate_llm_provider(cls, value: str) -> str:
+        """Validate LLM provider."""
+        valid_providers = {"openai", "gemini"}
+        if value.lower() not in valid_providers:
+            raise ValueError(f"Invalid LLM provider '{value}'. Must be one of: {valid_providers}")
+        return value.lower()
+
     @root_validator(pre=True)
     def resolve_workspace_paths(cls, values: Dict[str, Any]) -> Dict[str, Any]:
         """Resolve ${WORKSPACE_ROOT} in paths."""
@@ -106,11 +125,47 @@ class WorkflowConfiguration(BaseModel):
                 
         return processed
     
+    @root_validator(pre=True)
+    def setup_api_keys(cls, values: Dict[str, Any]) -> Dict[str, Any]:
+        """Set up API keys from environment if not provided."""
+        # Set up OpenAI API key
+        if not values.get("openai_api_key"):
+            values["openai_api_key"] = os.environ.get("OPENAI_API_KEY")
+            if not values["openai_api_key"] and values.get("llm_provider") == "openai":
+                logger.warning("No OpenAI API key found in config or environment")
+        
+        # Set up Gemini API key
+        if not values.get("gemini_api_key"):
+            values["gemini_api_key"] = os.environ.get("GEMINI_API_KEY")
+            if not values["gemini_api_key"] and values.get("llm_provider") == "gemini":
+                logger.warning("No Gemini API key found in config or environment")
+        
+        return values
+    
     class Config:
         """Pydantic configuration."""
         extra = "forbid"  # Disallow extra fields
         validate_assignment = True  # Validate when attributes are assigned
         arbitrary_types_allowed = True  # Allow arbitrary types (like Path)
+
+def ensure_workflow_config(config: Optional[Dict[str, Any]] = None) -> WorkflowConfiguration:
+    """Ensure a valid workflow configuration."""
+    if config is None:
+        config = {}
+    
+    # Convert dict to WorkflowConfiguration if needed
+    if isinstance(config, dict):
+        return WorkflowConfiguration(**config)
+    elif isinstance(config, WorkflowConfiguration):
+        return config
+    else:
+        raise ValueError(f"Invalid config type: {type(config)}")
+
+def merge_configs(base: WorkflowConfiguration, override: Dict[str, Any]) -> WorkflowConfiguration:
+    """Merge two configurations."""
+    merged = base.dict()
+    merged.update(override)
+    return WorkflowConfiguration(**merged)
 
 def load_config_file(file_path: str) -> Dict[str, Any]:
     """
@@ -174,69 +229,6 @@ def find_default_config() -> Optional[Dict[str, Any]]:
     
     logger.info("No configuration file found, using defaults")
     return None
-
-def merge_configs(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Recursively merge two configuration dictionaries.
-    
-    Args:
-        base: Base configuration
-        override: Configuration to override base values
-        
-    Returns:
-        Merged configuration dictionary
-    """
-    result = base.copy()
-    
-    for key, value in override.items():
-        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
-            result[key] = merge_configs(result[key], value)
-        else:
-            result[key] = value
-            
-    return result
-
-def ensure_workflow_config(config_input: Any) -> WorkflowConfiguration:
-    """
-    Ensures a valid WorkflowConfiguration object from various input types.
-    
-    Args:
-        config_input: Configuration input (dict, string path, or WorkflowConfiguration)
-        
-    Returns:
-        Validated WorkflowConfiguration object
-        
-    Raises:
-        ConfigurationError: If validation fails
-    """
-    try:
-        # If it's already a WorkflowConfiguration, return it
-        if isinstance(config_input, WorkflowConfiguration):
-            return config_input
-            
-        # If it's a string, assume it's a path and load it
-        if isinstance(config_input, str):
-            config_dict = load_config_file(config_input)
-        elif isinstance(config_input, dict):
-            config_dict = config_input
-        elif config_input is None:
-            # Find default config or use empty dict
-            config_dict = find_default_config() or {}
-        else:
-            raise ConfigurationError(f"Unsupported configuration input type: {type(config_input)}")
-        
-        # Handle nested 'configurable' key if present
-        if isinstance(config_dict, dict) and "configurable" in config_dict:
-            config_dict = config_dict["configurable"]
-            
-        # Create and validate configuration object
-        return WorkflowConfiguration(**config_dict)
-        
-    except Exception as e:
-        if isinstance(e, ConfigurationError):
-            raise
-        logger.error(f"Configuration validation failed: {e}")
-        raise ConfigurationError(f"Invalid configuration: {str(e)}")
 
 def validate_script_security(script_content: str) -> Dict[str, Any]:
     """

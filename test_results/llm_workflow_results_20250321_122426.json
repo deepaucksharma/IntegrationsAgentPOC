@@ -1,0 +1,338 @@
+[
+  {
+    "name": "standard-install",
+    "target_name": "infrastructure-agent",
+    "integration_type": "infra_agent",
+    "action": "install",
+    "platform": "windows",
+    "generation_methods": {
+      "template": {
+        "method": "template",
+        "success": true,
+        "duration_seconds": 0.001043,
+        "script_path": "generated_scripts\\infrastructure-agent_install_template_20250321_122344.ps1",
+        "script_size": 2977
+      },
+      "llm": {
+        "method": "llm",
+        "success": true,
+        "duration_seconds": 7.519783,
+        "script_path": "generated_scripts\\infrastructure-agent_install_llm_20250321_122352.ps1",
+        "script_size": 3888
+      },
+      "enhanced": {
+        "method": "enhanced",
+        "success": true,
+        "duration_seconds": 0.011998,
+        "script_path": "generated_scripts\\infrastructure-agent_install_enhanced_20250321_122352.ps1",
+        "script_size": 2977
+      }
+    },
+    "script_execution": {
+      "template": {
+        "success": true,
+        "duration_seconds": 0.001,
+        "error": null,
+        "exit_code": null,
+        "stdout_size": 0,
+        "stderr_size": 0
+      },
+      "llm": {
+        "success": true,
+        "duration_seconds": 0.0,
+        "error": null,
+        "exit_code": null,
+        "stdout_size": 0,
+        "stderr_size": 0
+      },
+      "enhanced": {
+        "success": true,
+        "duration_seconds": 0.001001,
+        "error": null,
+        "exit_code": null,
+        "stdout_size": 0,
+        "stderr_size": 0
+      }
+    }
+  },
+  {
+    "name": "custom-integration",
+    "target_name": "custom-integration",
+    "integration_type": "custom",
+    "action": "install",
+    "platform": "windows",
+    "generation_methods": {
+      "template": {
+        "method": "template",
+        "success": true,
+        "duration_seconds": 0.012796,
+        "script_path": "generated_scripts\\custom-integration_install_template_20250321_122352.ps1",
+        "script_size": 1867
+      },
+      "llm": {
+        "method": "llm",
+        "success": true,
+        "duration_seconds": 6.962105,
+        "script_path": "generated_scripts\\custom-integration_install_llm_20250321_122359.ps1",
+        "script_size": 2604
+      },
+      "enhanced": {
+        "method": "enhanced",
+        "success": true,
+        "duration_seconds": 0.022302,
+        "script_path": "generated_scripts\\custom-integration_install_enhanced_20250321_122359.ps1",
+        "script_size": 1867
+      }
+    },
+    "script_execution": {
+      "template": {
+        "success": true,
+        "duration_seconds": 0.0,
+        "error": null,
+        "exit_code": null,
+        "stdout_size": 0,
+        "stderr_size": 0
+      },
+      "llm": {
+        "success": true,
+        "duration_seconds": 0.000423,
+        "error": null,
+        "exit_code": null,
+        "stdout_size": 0,
+        "stderr_size": 0
+      },
+      "enhanced": {
+        "success": true,
+        "duration_seconds": 0.0,
+        "error": null,
+        "exit_code": null,
+        "stdout_size": 0,
+        "stderr_size": 0
+      }
+    }
+  },
+  {
+    "name": "uninstall",
+    "target_name": "infrastructure-agent",
+    "integration_type": "infra_agent",
+    "action": "uninstall",
+    "platform": "windows",
+    "generation_methods": {
+      "template": {
+        "method": "template",
+        "success": true,
+        "duration_seconds": 0.003018,
+        "script_path": "generated_scripts\\infrastructure-agent_uninstall_template_20250321_122359.ps1",
+        "script_size": 1227
+      },
+      "llm": {
+        "method": "llm",
+        "success": true,
+        "duration_seconds": 3.892342,
+        "script_path": "generated_scripts\\infrastructure-agent_uninstall_llm_20250321_122403.ps1",
+        "script_size": 1993
+      },
+      "enhanced": {
+        "method": "enhanced",
+        "success": true,
+        "duration_seconds": 0.0,
+        "script_path": "generated_scripts\\infrastructure-agent_uninstall_enhanced_20250321_122403.ps1",
+        "script_size": 1227
+      }
+    },
+    "script_execution": {
+      "template": {
+        "success": true,
+        "duration_seconds": 0.013213,
+        "error": null,
+        "exit_code": null,
+        "stdout_size": 0,
+        "stderr_size": 0
+      },
+      "llm": {
+        "success": true,
+        "duration_seconds": 0.0,
+        "error": null,
+        "exit_code": null,
+        "stdout_size": 0,
+        "stderr_size": 0
+      },
+      "enhanced": {
+        "success": true,
+        "duration_seconds": 0.0,
+        "error": null,
+        "exit_code": null,
+        "stdout_size": 0,
+        "stderr_size": 0
+      }
+    }
+  },
+  {
+    "name": "minimal-params",
+    "target_name": "infrastructure-agent",
+    "integration_type": "infra_agent",
+    "action": "install",
+    "platform": "windows",
+    "generation_methods": {
+      "template": {
+        "method": "template",
+        "success": true,
+        "duration_seconds": 0.004672,
+        "script_path": "generated_scripts\\infrastructure-agent_install_template_20250321_122403.ps1",
+        "script_size": 2574
+      },
+      "llm": {
+        "method": "llm",
+        "success": true,
+        "duration_seconds": 6.90109,
+        "script_path": "generated_scripts\\infrastructure-agent_install_llm_20250321_122410.ps1",
+        "script_size": 3599
+      },
+      "enhanced": {
+        "method": "enhanced",
+        "success": true,
+        "duration_seconds": 0.01883,
+        "script_path": "generated_scripts\\infrastructure-agent_install_enhanced_20250321_122410.ps1",
+        "script_size": 2574
+      }
+    },
+    "script_execution": {
+      "template": {
+        "success": true,
+        "duration_seconds": 0.0,
+        "error": null,
+        "exit_code": null,
+        "stdout_size": 0,
+        "stderr_size": 0
+      },
+      "llm": {
+        "success": true,
+        "duration_seconds": 0.001,
+        "error": null,
+        "exit_code": null,
+        "stdout_size": 0,
+        "stderr_size": 0
+      },
+      "enhanced": {
+        "success": true,
+        "duration_seconds": 0.0,
+        "error": null,
+        "exit_code": null,
+        "stdout_size": 0,
+        "stderr_size": 0
+      }
+    }
+  },
+  {
+    "name": "complex-params",
+    "target_name": "infrastructure-agent",
+    "integration_type": "infra_agent",
+    "action": "install",
+    "platform": "windows",
+    "generation_methods": {
+      "template": {
+        "method": "template",
+        "success": true,
+        "duration_seconds": 0.000379,
+        "script_path": "generated_scripts\\infrastructure-agent_install_template_20250321_122410.ps1",
+        "script_size": 2644
+      },
+      "llm": {
+        "method": "llm",
+        "success": true,
+        "duration_seconds": 7.229061,
+        "script_path": "generated_scripts\\infrastructure-agent_install_llm_20250321_122417.ps1",
+        "script_size": 3485
+      },
+      "enhanced": {
+        "method": "enhanced",
+        "success": true,
+        "duration_seconds": 0.0,
+        "script_path": "generated_scripts\\infrastructure-agent_install_enhanced_20250321_122417.ps1",
+        "script_size": 2644
+      }
+    },
+    "script_execution": {
+      "template": {
+        "success": true,
+        "duration_seconds": 0.0,
+        "error": null,
+        "exit_code": null,
+        "stdout_size": 0,
+        "stderr_size": 0
+      },
+      "llm": {
+        "success": true,
+        "duration_seconds": 0.000778,
+        "error": null,
+        "exit_code": null,
+        "stdout_size": 0,
+        "stderr_size": 0
+      },
+      "enhanced": {
+        "success": true,
+        "duration_seconds": 0.0,
+        "error": null,
+        "exit_code": null,
+        "stdout_size": 0,
+        "stderr_size": 0
+      }
+    }
+  },
+  {
+    "name": "platform-specific",
+    "target_name": "infrastructure-agent",
+    "integration_type": "infra_agent",
+    "action": "install",
+    "platform": "windows",
+    "generation_methods": {
+      "template": {
+        "method": "template",
+        "success": true,
+        "duration_seconds": 0.000999,
+        "script_path": "generated_scripts\\infrastructure-agent_install_template_20250321_122417.ps1",
+        "script_size": 2643
+      },
+      "llm": {
+        "method": "llm",
+        "success": true,
+        "duration_seconds": 9.242214,
+        "script_path": "generated_scripts\\infrastructure-agent_install_llm_20250321_122426.ps1",
+        "script_size": 3643
+      },
+      "enhanced": {
+        "method": "enhanced",
+        "success": true,
+        "duration_seconds": 0.0,
+        "script_path": "generated_scripts\\infrastructure-agent_install_enhanced_20250321_122426.ps1",
+        "script_size": 2643
+      }
+    },
+    "script_execution": {
+      "template": {
+        "success": true,
+        "duration_seconds": 0.00048,
+        "error": null,
+        "exit_code": null,
+        "stdout_size": 0,
+        "stderr_size": 0
+      },
+      "llm": {
+        "success": true,
+        "duration_seconds": 0.0,
+        "error": null,
+        "exit_code": null,
+        "stdout_size": 0,
+        "stderr_size": 0
+      },
+      "enhanced": {
+        "success": true,
+        "duration_seconds": 0.0,
+        "error": null,
+        "exit_code": null,
+        "stdout_size": 0,
+        "stderr_size": 0
+      }
+    }
+  }
+]

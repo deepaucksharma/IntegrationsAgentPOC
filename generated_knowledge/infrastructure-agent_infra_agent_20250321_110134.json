@@ -1,0 +1,11 @@
+{
+  "remote_docs": {
+    "integration_type": "infra_agent",
+    "mock": true,
+    "installation_steps": [
+      "Download the integration package",
+      "Configure the integration",
+      "Start the integration service"
+    ]
+  }
+}

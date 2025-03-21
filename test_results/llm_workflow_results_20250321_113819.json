@@ -1,0 +1,170 @@
+[
+  {
+    "name": "standard-install",
+    "target_name": "infrastructure-agent",
+    "integration_type": "infra_agent",
+    "action": "install",
+    "platform": "windows",
+    "generation_methods": {
+      "template": {
+        "method": "template",
+        "success": false,
+        "duration_seconds": 0.0,
+        "error": "No template path provided by integration."
+      },
+      "llm": {
+        "method": "llm",
+        "success": false,
+        "duration_seconds": 2.933322,
+        "error": "LLM generation failed to produce a valid script"
+      },
+      "enhanced": {
+        "method": "enhanced",
+        "success": false,
+        "duration_seconds": 2.90008,
+        "error": "No template path provided by integration."
+      }
+    },
+    "script_execution": {}
+  },
+  {
+    "name": "custom-integration",
+    "target_name": "custom-integration",
+    "integration_type": "custom",
+    "action": "install",
+    "platform": "windows",
+    "generation_methods": {
+      "template": {
+        "method": "template",
+        "success": false,
+        "duration_seconds": 0.0,
+        "error": "No template path provided by integration."
+      },
+      "llm": {
+        "method": "llm",
+        "success": false,
+        "duration_seconds": 2.899933,
+        "error": "LLM generation failed to produce a valid script"
+      },
+      "enhanced": {
+        "method": "enhanced",
+        "success": false,
+        "duration_seconds": 2.881843,
+        "error": "No template path provided by integration."
+      }
+    },
+    "script_execution": {}
+  },
+  {
+    "name": "uninstall",
+    "target_name": "infrastructure-agent",
+    "integration_type": "infra_agent",
+    "action": "remove",
+    "platform": "windows",
+    "generation_methods": {
+      "template": {
+        "method": "template",
+        "success": false,
+        "duration_seconds": 0.0,
+        "error": "No template path provided by integration."
+      },
+      "llm": {
+        "method": "llm",
+        "success": false,
+        "duration_seconds": 2.901678,
+        "error": "LLM generation failed to produce a valid script"
+      },
+      "enhanced": {
+        "method": "enhanced",
+        "success": false,
+        "duration_seconds": 2.883388,
+        "error": "No template path provided by integration."
+      }
+    },
+    "script_execution": {}
+  },
+  {
+    "name": "minimal-params",
+    "target_name": "infrastructure-agent",
+    "integration_type": "infra_agent",
+    "action": "install",
+    "platform": "windows",
+    "generation_methods": {
+      "template": {
+        "method": "template",
+        "success": false,
+        "duration_seconds": 0.0,
+        "error": "No template path provided by integration."
+      },
+      "llm": {
+        "method": "llm",
+        "success": false,
+        "duration_seconds": 2.933495,
+        "error": "LLM generation failed to produce a valid script"
+      },
+      "enhanced": {
+        "method": "enhanced",
+        "success": false,
+        "duration_seconds": 2.899419,
+        "error": "No template path provided by integration."
+      }
+    },
+    "script_execution": {}
+  },
+  {
+    "name": "complex-params",
+    "target_name": "infrastructure-agent",
+    "integration_type": "infra_agent",
+    "action": "install",
+    "platform": "windows",
+    "generation_methods": {
+      "template": {
+        "method": "template",
+        "success": false,
+        "duration_seconds": 0.0,
+        "error": "No template path provided by integration."
+      },
+      "llm": {
+        "method": "llm",
+        "success": false,
+        "duration_seconds": 2.936011,
+        "error": "LLM generation failed to produce a valid script"
+      },
+      "enhanced": {
+        "method": "enhanced",
+        "success": false,
+        "duration_seconds": 2.880773,
+        "error": "No template path provided by integration."
+      }
+    },
+    "script_execution": {}
+  },
+  {
+    "name": "platform-specific",
+    "target_name": "infrastructure-agent",
+    "integration_type": "infra_agent",
+    "action": "install",
+    "platform": "windows",
+    "generation_methods": {
+      "template": {
+        "method": "template",
+        "success": false,
+        "duration_seconds": 0.0,
+        "error": "No template path provided by integration."
+      },
+      "llm": {
+        "method": "llm",
+        "success": false,
+        "duration_seconds": 2.883799,
+        "error": "LLM generation failed to produce a valid script"
+      },
+      "enhanced": {
+        "method": "enhanced",
+        "success": false,
+        "duration_seconds": 2.985774,
+        "error": "No template path provided by integration."
+      }
+    },
+    "script_execution": {}
+  }
+]

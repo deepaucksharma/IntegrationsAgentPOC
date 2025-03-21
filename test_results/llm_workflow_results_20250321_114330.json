@@ -1,0 +1,265 @@
+[
+  {
+    "name": "standard-install",
+    "target_name": "infrastructure-agent",
+    "integration_type": "infra_agent",
+    "action": "install",
+    "platform": "windows",
+    "generation_methods": {
+      "template": {
+        "method": "template",
+        "success": true,
+        "duration_seconds": 0.015345,
+        "script_path": "generated_scripts\\infrastructure-agent_install_template_20250321_114254.ps1",
+        "script_size": 2977
+      },
+      "llm": {
+        "method": "llm",
+        "success": false,
+        "duration_seconds": 2.916724,
+        "error": "LLM generation failed to produce a valid script"
+      },
+      "enhanced": {
+        "method": "enhanced",
+        "success": true,
+        "duration_seconds": 2.967037,
+        "script_path": "generated_scripts\\infrastructure-agent_install_enhanced_20250321_114300.ps1",
+        "script_size": 2977
+      }
+    },
+    "script_execution": {
+      "template": {
+        "success": true,
+        "duration_seconds": 0.006021,
+        "error": null,
+        "exit_code": null,
+        "stdout_size": 0,
+        "stderr_size": 0
+      },
+      "enhanced": {
+        "success": true,
+        "duration_seconds": 0.0,
+        "error": null,
+        "exit_code": null,
+        "stdout_size": 0,
+        "stderr_size": 0
+      }
+    }
+  },
+  {
+    "name": "custom-integration",
+    "target_name": "custom-integration",
+    "integration_type": "custom",
+    "action": "install",
+    "platform": "windows",
+    "generation_methods": {
+      "template": {
+        "method": "template",
+        "success": false,
+        "duration_seconds": 0.01103,
+        "error": "'log_message' is undefined"
+      },
+      "llm": {
+        "method": "llm",
+        "success": false,
+        "duration_seconds": 2.887776,
+        "error": "LLM generation failed to produce a valid script"
+      },
+      "enhanced": {
+        "method": "enhanced",
+        "success": false,
+        "duration_seconds": 3.014044,
+        "error": "'log_message' is undefined"
+      }
+    },
+    "script_execution": {}
+  },
+  {
+    "name": "uninstall",
+    "target_name": "infrastructure-agent",
+    "integration_type": "infra_agent",
+    "action": "uninstall",
+    "platform": "windows",
+    "generation_methods": {
+      "template": {
+        "method": "template",
+        "success": true,
+        "duration_seconds": 0.001012,
+        "script_path": "generated_scripts\\infrastructure-agent_uninstall_template_20250321_114306.ps1",
+        "script_size": 1130
+      },
+      "llm": {
+        "method": "llm",
+        "success": false,
+        "duration_seconds": 2.976204,
+        "error": "LLM generation failed to produce a valid script"
+      },
+      "enhanced": {
+        "method": "enhanced",
+        "success": true,
+        "duration_seconds": 2.899863,
+        "script_path": "generated_scripts\\infrastructure-agent_uninstall_enhanced_20250321_114312.ps1",
+        "script_size": 1130
+      }
+    },
+    "script_execution": {
+      "template": {
+        "success": true,
+        "duration_seconds": 0.0,
+        "error": null,
+        "exit_code": null,
+        "stdout_size": 0,
+        "stderr_size": 0
+      },
+      "enhanced": {
+        "success": true,
+        "duration_seconds": 0.0,
+        "error": null,
+        "exit_code": null,
+        "stdout_size": 0,
+        "stderr_size": 0
+      }
+    }
+  },
+  {
+    "name": "minimal-params",
+    "target_name": "infrastructure-agent",
+    "integration_type": "infra_agent",
+    "action": "install",
+    "platform": "windows",
+    "generation_methods": {
+      "template": {
+        "method": "template",
+        "success": true,
+        "duration_seconds": 0.004457,
+        "script_path": "generated_scripts\\infrastructure-agent_install_template_20250321_114312.ps1",
+        "script_size": 2574
+      },
+      "llm": {
+        "method": "llm",
+        "success": false,
+        "duration_seconds": 2.883679,
+        "error": "LLM generation failed to produce a valid script"
+      },
+      "enhanced": {
+        "method": "enhanced",
+        "success": true,
+        "duration_seconds": 2.901801,
+        "script_path": "generated_scripts\\infrastructure-agent_install_enhanced_20250321_114318.ps1",
+        "script_size": 2574
+      }
+    },
+    "script_execution": {
+      "template": {
+        "success": true,
+        "duration_seconds": 0.0,
+        "error": null,
+        "exit_code": null,
+        "stdout_size": 0,
+        "stderr_size": 0
+      },
+      "enhanced": {
+        "success": true,
+        "duration_seconds": 0.000622,
+        "error": null,
+        "exit_code": null,
+        "stdout_size": 0,
+        "stderr_size": 0
+      }
+    }
+  },
+  {
+    "name": "complex-params",
+    "target_name": "infrastructure-agent",
+    "integration_type": "infra_agent",
+    "action": "install",
+    "platform": "windows",
+    "generation_methods": {
+      "template": {
+        "method": "template",
+        "success": true,
+        "duration_seconds": 0.004002,
+        "script_path": "generated_scripts\\infrastructure-agent_install_template_20250321_114318.ps1",
+        "script_size": 2644
+      },
+      "llm": {
+        "method": "llm",
+        "success": false,
+        "duration_seconds": 3.015062,
+        "error": "LLM generation failed to produce a valid script"
+      },
+      "enhanced": {
+        "method": "enhanced",
+        "success": true,
+        "duration_seconds": 2.966891,
+        "script_path": "generated_scripts\\infrastructure-agent_install_enhanced_20250321_114324.ps1",
+        "script_size": 2644
+      }
+    },
+    "script_execution": {
+      "template": {
+        "success": true,
+        "duration_seconds": 0.0,
+        "error": null,
+        "exit_code": null,
+        "stdout_size": 0,
+        "stderr_size": 0
+      },
+      "enhanced": {
+        "success": true,
+        "duration_seconds": 0.0,
+        "error": null,
+        "exit_code": null,
+        "stdout_size": 0,
+        "stderr_size": 0
+      }
+    }
+  },
+  {
+    "name": "platform-specific",
+    "target_name": "infrastructure-agent",
+    "integration_type": "infra_agent",
+    "action": "install",
+    "platform": "windows",
+    "generation_methods": {
+      "template": {
+        "method": "template",
+        "success": true,
+        "duration_seconds": 0.010396,
+        "script_path": "generated_scripts\\infrastructure-agent_install_template_20250321_114324.ps1",
+        "script_size": 2643
+      },
+      "llm": {
+        "method": "llm",
+        "success": false,
+        "duration_seconds": 2.936719,
+        "error": "LLM generation failed to produce a valid script"
+      },
+      "enhanced": {
+        "method": "enhanced",
+        "success": true,
+        "duration_seconds": 2.900672,
+        "script_path": "generated_scripts\\infrastructure-agent_install_enhanced_20250321_114330.ps1",
+        "script_size": 2643
+      }
+    },
+    "script_execution": {
+      "template": {
+        "success": true,
+        "duration_seconds": 0.0,
+        "error": null,
+        "exit_code": null,
+        "stdout_size": 0,
+        "stderr_size": 0
+      },
+      "enhanced": {
+        "success": true,
+        "duration_seconds": 0.000999,
+        "error": null,
+        "exit_code": null,
+        "stdout_size": 0,
+        "stderr_size": 0
+      }
+    }
+  }
+]

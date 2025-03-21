@@ -1,0 +1,68 @@
+[
+  {
+    "target_name": "infrastructure-agent",
+    "integration_type": "infra_agent",
+    "platform": {
+      "system": "windows",
+      "distribution": "windows",
+      "version": "10.0"
+    },
+    "status": "failed",
+    "error": "No installation methods available"
+  },
+  {
+    "target_name": "infrastructure-agent",
+    "integration_type": "infra_agent",
+    "platform": {
+      "system": "linux",
+      "distribution": "ubuntu",
+      "version": "20.04"
+    },
+    "status": "failed",
+    "error": "No installation methods available"
+  },
+  {
+    "target_name": "infrastructure-agent",
+    "integration_type": "infra_agent",
+    "platform": {
+      "system": "linux",
+      "distribution": "centos",
+      "version": "8"
+    },
+    "status": "failed",
+    "error": "No installation methods available"
+  },
+  {
+    "target_name": "custom-integration",
+    "integration_type": "custom",
+    "platform": {
+      "system": "linux",
+      "distribution": "ubuntu",
+      "version": "20.04"
+    },
+    "status": "failed",
+    "error": "No installation methods available"
+  },
+  {
+    "target_name": "custom-integration",
+    "integration_type": "custom",
+    "platform": {
+      "system": "windows",
+      "distribution": "windows",
+      "version": "10.0"
+    },
+    "status": "failed",
+    "error": "No installation methods available"
+  },
+  {
+    "target_name": "monitoring-agent",
+    "integration_type": "infra_agent",
+    "platform": {
+      "system": "linux",
+      "distribution": "ubuntu",
+      "version": "20.04"
+    },
+    "status": "failed",
+    "error": "No installation methods available"
+  }
+]

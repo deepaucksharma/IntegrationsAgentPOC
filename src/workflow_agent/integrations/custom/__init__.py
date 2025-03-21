@@ -1,6 +1,6 @@
 """
-Custom integration plugin.
+Custom integration package.
 """
-from .custom import CustomIntegration
+from .custom_integration import CustomIntegration
 
 __all__ = ["CustomIntegration"] 

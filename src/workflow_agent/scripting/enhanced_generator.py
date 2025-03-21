@@ -13,102 +13,51 @@ from ..config.configuration import ensure_workflow_config
 
 logger = logging.getLogger(__name__)
 
-class EnhancedScriptGenerator:
-    """Enhanced script generator that uses LLM when available with template fallback."""
+class EnhancedScriptGenerator(ScriptGenerator):
+    """Enhanced script generator that combines template and LLM approaches."""
     
-    def __init__(self, api_key: Optional[str] = None, model: str = "gpt-4"):
-        """
-        Initialize the enhanced script generator.
-        
-        Args:
-            api_key: Optional API key for LLM service
-            model: LLM model to use
-        """
-        self.llm_generator = LLMScriptGenerator(api_key=api_key, model=model)
-        self.template_generator = ScriptGenerator()
-        self.priority = "llm"  # 'llm' or 'template' - default to LLM if available
-        
+    def __init__(self, config: Optional[Dict[str, Any]] = None):
+        """Initialize the enhanced script generator."""
+        super().__init__()
+        self.config = config or {}
+        self.llm_generator = None
+        self.template_generator = None
+    
     async def initialize(self) -> None:
-        """Initialize the script generators."""
-        await self.llm_generator.initialize()
-        # No initialization needed for template generator
-        
-    async def generate_script(self, state: WorkflowState, config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """
-        Generate a script using LLM with template fallback.
-        
-        Args:
-            state: Workflow state
-            config: Optional configuration
-            
-        Returns:
-            Dictionary with script or error
-        """
+        """Initialize the generator components."""
         try:
-            # Get configuration
-            workflow_config = ensure_workflow_config(config or {})
+            self.llm_generator = LLMScriptGenerator(self.config)
+            await self.llm_generator.initialize()
+            logger.info("Using LLM-based script generation")
+        except Exception as e:
+            logger.warning(f"Failed to initialize LLM generator: {str(e)}")
+            logger.info("Falling back to template-based generation only")
+        
+        self.template_generator = ScriptGenerator()
+    
+    async def generate_script(self, state: WorkflowState, config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Generate a script using enhanced approach."""
+        try:
+            # Update config if provided
+            if config:
+                self.config.update(config)
             
-            # Check if LLM is explicitly disabled in config
-            use_llm = workflow_config.use_llm if hasattr(workflow_config, "use_llm") else True
-            
-            # Get API key from config if not provided during initialization
-            api_key = getattr(self.llm_generator, "api_key", None)
-            if not api_key and use_llm:
-                # Try to get API key from config or environment
-                config_api_key = getattr(workflow_config, "openai_api_key", None) if hasattr(workflow_config, "openai_api_key") else None
-                env_api_key = os.environ.get("OPENAI_API_KEY")
-                
-                api_key = config_api_key or env_api_key
-                if api_key:
-                    self.llm_generator.api_key = api_key
-                    await self.llm_generator.initialize()
-            
-            # Determine generation approach
-            if not use_llm or self.priority == "template":
-                # Use template-based generation as primary
+            # Try LLM generation first if available
+            if self.llm_generator:
                 try:
-                    logger.info("Using template-based script generation")
-                    result = await self.template_generator.generate_script(state, config)
-                    if "error" in result:
-                        # Fall back to LLM if template fails
-                        logger.warning(f"Template generation failed: {result['error']}. Trying LLM generation.")
-                        if use_llm and api_key:
-                            result = await self.llm_generator.generate_script(state, config)
-                    return result
+                    llm_result = await self.llm_generator.generate_script(state)
+                    if not llm_result.get("error"):
+                        return llm_result
+                    logger.warning(f"LLM generation failed: {llm_result['error']}. Falling back to template generation.")
                 except Exception as e:
-                    logger.error(f"Template generation failed with error: {e}")
-                    if use_llm and api_key:
-                        logger.info("Falling back to LLM generation")
-                        return await self.llm_generator.generate_script(state, config)
-                    raise
-            else:
-                # Use LLM-based generation as primary
-                if use_llm and api_key:
-                    try:
-                        logger.info("Using LLM-based script generation")
-                        result = await self.llm_generator.generate_script(state, config)
-                        if "error" in result:
-                            # Fall back to template if LLM fails
-                            logger.warning(f"LLM generation failed: {result['error']}. Falling back to template generation.")
-                            result = await self.template_generator.generate_script(state, config)
-                        return result
-                    except Exception as e:
-                        logger.error(f"LLM generation failed with error: {e}")
-                        logger.info("Falling back to template generation")
-                        return await self.template_generator.generate_script(state, config)
-                else:
-                    # Use template if LLM not available
-                    logger.info("LLM not available. Using template-based generation.")
-                    return await self.template_generator.generate_script(state, config)
+                    logger.warning(f"Error in LLM generation: {str(e)}. Falling back to template generation.")
+            
+            # Fall back to template generation
+            return await self.template_generator.generate_script(state)
         
         except Exception as e:
-            logger.error(f"Script generation failed: {e}", exc_info=True)
-            context = ErrorContext(
-                component="EnhancedScriptGenerator",
-                operation="generate_script",
-                details={"error": str(e)}
-            )
-            raise ScriptError(f"Script generation failed: {str(e)}", context=context)
+            logger.error(f"Error in enhanced script generation: {str(e)}")
+            return {"error": f"Enhanced generation error: {str(e)}"}
 
     def set_priority(self, priority: str) -> None:
         """
@@ -119,7 +68,6 @@ class EnhancedScriptGenerator:
         """
         if priority not in ["llm", "template"]:
             raise ValueError("Priority must be either 'llm' or 'template'")
-        self.priority = priority
         logger.info(f"Script generation priority set to: {priority}")
 
 # Helper function to create a script generator based on configuration
@@ -147,7 +95,7 @@ async def create_script_generator(config: Optional[Dict[str, Any]] = None) -> En
         model = getattr(workflow_config, "llm_model", "gpt-4") if hasattr(workflow_config, "llm_model") else "gpt-4"
         
         # Create generator
-        generator = EnhancedScriptGenerator(api_key=api_key, model=model)
+        generator = EnhancedScriptGenerator(config={"api_key": api_key, "model": model})
         
         try:
             # Initialize

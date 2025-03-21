@@ -21,6 +21,30 @@ echo "Mock template for testing"
 exit 0
 "@
 
+# Create workflow configuration
+$WORKFLOW_CONFIG = @"
+# Workflow Agent Configuration
+
+# Logging Configuration
+log_level: "DEBUG"
+log_file: "workflow_agent.log"
+
+# Integration Configuration
+template_dir: "./templates"
+storage_dir: "./storage"
+plugin_dirs: 
+  - "./plugins"
+
+# LLM Configuration
+llm_provider: "gemini"
+gemini_api_key: "AIzaSyAyGoywP_4dr5fWFi8LjR6ZV6gyk7HuAME"
+
+# Execution Configuration
+use_recovery: true
+max_retries: 3
+timeout_seconds: 300
+"@
+
 # Function to check if running as administrator
 function Test-AdminPrivileges {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -98,6 +122,25 @@ function Invoke-WorkflowAgentWithTimeout {
     return $result
 }
 
+# Function to run a test suite with proper formatting
+function Invoke-TestSuite {
+    param(
+        [string]$Name,
+        [scriptblock]$TestBlock
+    )
+    Write-Host "`nRunning ${Name}..." -ForegroundColor Yellow
+    try {
+        & $TestBlock
+        Write-Host "${Name}: SUCCESS" -ForegroundColor Green
+        return $true
+    }
+    catch {
+        Write-Host "${Name}: FAILED - $_" -ForegroundColor Red
+        Write-Host "Stack trace: $($_.ScriptStackTrace)" -ForegroundColor Red
+        return $false
+    }
+}
+
 # Main execution block
 try {
     # Check administrator privileges
@@ -124,75 +167,82 @@ try {
     Write-Host "Activating virtual environment..." -ForegroundColor Yellow
     & .\venv\Scripts\Activate.ps1
 
-    # Upgrade pip and install dependencies
-    Write-Host "Upgrading pip and installing dependencies..." -ForegroundColor Yellow
+    # Clean up any existing installations
+    Write-Host "Cleaning up existing installations..." -ForegroundColor Yellow
+    pip uninstall -y workflow-agent
+
+    # Install dependencies
+    Write-Host "Installing dependencies..." -ForegroundColor Yellow
     python -m pip install --upgrade pip
     pip install -r requirements.txt
-    pip install -e .
+    pip install -e ".[llm]"
+
+    # Create configuration
+    Write-Host "Creating workflow configuration..." -ForegroundColor Yellow
+    Set-Content -Path "workflow_config.yaml" -Value $WORKFLOW_CONFIG
+    Write-Host "Configuration saved to workflow_config.yaml" -ForegroundColor Gray
+
+    # Create required directories
+    Write-Host "Creating required directories..." -ForegroundColor Yellow
+    New-Item -ItemType Directory -Path "templates" -Force | Out-Null
+    New-Item -ItemType Directory -Path "storage" -Force | Out-Null
+    New-Item -ItemType Directory -Path "plugins" -Force | Out-Null
 
     # Create mock templates
     Write-Host "Setting up mock templates..." -ForegroundColor Yellow
     Create-MockTemplates
 
-    # Test Scenarios
-    Write-Host "`nRunning test scenarios..." -ForegroundColor Green
+    # Initialize test results tracking
+    $testResults = @{}
 
-    # 1. Test basic help command
-    Write-Host "`nTesting help command..." -ForegroundColor Yellow
-    try {
-        $env:PYTHONPATH = ".\src"
-        workflow-agent --help
-        Write-Host "Help command test: SUCCESS" -ForegroundColor Green
-    }
-    catch {
-        Write-Host "Help command test: FAILED - $_" -ForegroundColor Red
-    }
+    # Test Suites
+    Write-Host "`nRunning test suites..." -ForegroundColor Green
 
-    # 2. Test installation scenario
-    Write-Host "`nTesting installation scenario..." -ForegroundColor Yellow
-    try {
-        $result = Invoke-WorkflowAgentWithTimeout @("install", "infra_agent", "--license-key", $TEST_LICENSE_KEY, "--host", $TEST_HOST)
-        Write-Host "Installation test completed" -ForegroundColor Green
-    }
-    catch {
-        Write-Host "Installation test warning: $_" -ForegroundColor Yellow
+    # Set Python path for all tests
+    $env:PYTHONPATH = (Resolve-Path ".\src").Path
+
+    # 1. Basic Functionality Tests
+    $testResults["Basic Help"] = Invoke-TestSuite "Basic Help Command" {
+        python -m workflow_agent --help
     }
 
-    # 3. Test verification scenario
-    Write-Host "`nTesting verification scenario..." -ForegroundColor Yellow
-    try {
-        $result = Invoke-WorkflowAgentWithTimeout @("verify", "infra_agent")
-        Write-Host "Verification test completed" -ForegroundColor Green
-    }
-    catch {
-        Write-Host "Verification test warning: $_" -ForegroundColor Yellow
+    # 2. Core Workflow Tests
+    $testResults["Installation"] = Invoke-TestSuite "Installation Workflow" {
+        python -m workflow_agent install infra_agent --license-key $TEST_LICENSE_KEY --host $TEST_HOST
     }
 
-    # 4. Test removal scenario
-    Write-Host "`nTesting removal scenario..." -ForegroundColor Yellow
-    try {
-        $result = Invoke-WorkflowAgentWithTimeout @("remove", "infra_agent")
-        Write-Host "Removal test completed" -ForegroundColor Green
-    }
-    catch {
-        Write-Host "Removal test warning: $_" -ForegroundColor Yellow
+    $testResults["Verification"] = Invoke-TestSuite "Verification Workflow" {
+        python -m workflow_agent verify infra_agent --host $TEST_HOST
     }
 
-    # 5. Test example workflow
-    Write-Host "`nTesting example workflow..." -ForegroundColor Yellow
-    try {
+    $testResults["Removal"] = Invoke-TestSuite "Removal Workflow" {
+        python -m workflow_agent remove infra_agent --host $TEST_HOST
+    }
+
+    # 3. LLM Workflow Tests
+    $testResults["LLM Workflows"] = Invoke-TestSuite "LLM Workflow Tests" {
+        python test_llm_workflows.py
+    }
+
+    # 4. Example Workflow
+    $testResults["Example Workflow"] = Invoke-TestSuite "Example Workflow" {
         python test_workflow.py
-        Write-Host "Example workflow test completed" -ForegroundColor Green
-    }
-    catch {
-        Write-Host "Example workflow test warning: $_" -ForegroundColor Yellow
     }
 
     # Final status report
     Write-Host "`nTest Execution Summary:" -ForegroundColor Cyan
-    Write-Host "- Environment setup: COMPLETED" -ForegroundColor Green
+    Write-Host "Environment Setup:" -ForegroundColor White
+    Write-Host "- Python environment: READY" -ForegroundColor Green
+    Write-Host "- Dependencies: INSTALLED" -ForegroundColor Green
+    Write-Host "- Configuration: CREATED" -ForegroundColor Green
     Write-Host "- Mock templates: CREATED" -ForegroundColor Green
-    Write-Host "- Basic functionality tests: COMPLETED" -ForegroundColor Green
+
+    Write-Host "`nTest Results:" -ForegroundColor White
+    foreach ($test in $testResults.Keys) {
+        $status = if ($testResults[$test]) { "SUCCESS" } else { "FAILED" }
+        $color = if ($testResults[$test]) { "Green" } else { "Red" }
+        Write-Host "- $test : $status" -ForegroundColor $color
+    }
     
     if (-not (Test-AdminPrivileges)) {
         Write-Host "`nNote: Some tests may have failed due to lack of administrator privileges." -ForegroundColor Yellow
@@ -203,6 +253,14 @@ try {
     Write-Host "`nTo activate the virtual environment in a new terminal, run:" -ForegroundColor Cyan
     Write-Host ".\venv\Scripts\Activate.ps1" -ForegroundColor Gray
 
+    # Check if any tests failed
+    if ($testResults.Values -contains $false) {
+        Write-Host "`nWarning: Some tests failed. Please review the output above." -ForegroundColor Yellow
+        exit 1
+    }
+    else {
+        Write-Host "`nAll tests completed successfully!" -ForegroundColor Green
+    }
 }
 catch {
     Write-Host "`nError during setup/testing: $_" -ForegroundColor Red

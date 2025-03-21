@@ -11,51 +11,22 @@ from ..core.state import WorkflowState
 
 logger = logging.getLogger(__name__)
 
-class BaseIntegration(ABC):
+class IntegrationBase(ABC):
     """Base class for all integration plugins."""
     
     def __init__(self):
-        self.name: str = ""
-        self.version: str = ""
-        self.description: str = ""
+        self.name: str = self.get_name()
+        self.version: str = "1.0.0"
+        self.description: str = "Base integration class"
         
-    @abstractmethod
-    async def install(self, parameters: Dict[str, Any]) -> Dict[str, Any]:
-        """Install the integration."""
-        pass
-        
-    @abstractmethod
-    async def verify(self, parameters: Dict[str, Any]) -> Dict[str, Any]:
-        """Verify the integration installation."""
-        pass
-        
-    @abstractmethod
-    async def uninstall(self, parameters: Dict[str, Any]) -> Dict[str, Any]:
-        """Uninstall the integration."""
-        pass
-        
-    def get_info(self) -> Dict[str, str]:
-        """Get integration information."""
-        return {
-            "name": self.name,
-            "version": self.version,
-            "description": self.description
-        }
-
-class IntegrationBase:
-    """
-    Base integration that loads:
-      - definition.yaml
-      - parameters.yaml
-      - verification.yaml
-    based on integration_type and target_name.
-    """
     @classmethod
     def get_name(cls) -> str:
+        """Get the integration name."""
         return cls.__name__.lower().replace("integration", "")
     
     @classmethod
     def get_supported_targets(cls) -> List[str]:
+        """Get list of supported targets."""
         root = Path(__file__).parent
         integration_name = cls.get_name()
         integration_dir = root / integration_name
@@ -65,15 +36,18 @@ class IntegrationBase:
         
     @classmethod
     def get_category(cls) -> str:
+        """Get the integration category."""
         return "custom"
     
     @classmethod
     def _integration_folder(cls, state: WorkflowState) -> Path:
+        """Get the integration folder path."""
         root = Path(__file__).parent
         return root / state.integration_type.lower() / state.target_name.lower()
 
     @classmethod
     def get_integration_definition(cls, state: WorkflowState) -> Dict[str, Any]:
+        """Get the integration definition from YAML."""
         folder = cls._integration_folder(state)
         path = folder / "definition.yaml"
         if not path.exists():
@@ -91,9 +65,11 @@ class IntegrationBase:
 
     @classmethod
     def get_parameter_schema(cls, state: WorkflowState) -> Dict[str, Any]:
+        """Get the parameter schema from YAML."""
         folder = cls._integration_folder(state)
         path = folder / "parameters.yaml"
         if not path.exists():
+            logger.warning(f"No parameters.yaml found at {path}")
             return {}
         try:
             with open(path, "r") as f:
@@ -107,9 +83,11 @@ class IntegrationBase:
 
     @classmethod
     def get_verification_data(cls, state: WorkflowState) -> Dict[str, Any]:
+        """Get the verification data from YAML."""
         folder = cls._integration_folder(state)
         path = folder / "verification.yaml"
         if not path.exists():
+            logger.warning(f"No verification.yaml found at {path}")
             return {}
         try:
             with open(path, "r") as f:
@@ -121,35 +99,28 @@ class IntegrationBase:
             logger.error(f"Error reading file {path}: {e}")
             return {}
 
-    async def validate(self, state: WorkflowState) -> Dict[str, Any]:
-        missing_params = []
-        parameter_schema = self.get_parameter_schema(state)
-        for name, spec in parameter_schema.items():
-            if spec.get("required", False) and (name not in state.parameters or state.parameters[name] is None):
-                missing_params.append(name)
-        if missing_params:
-            return {
-                "valid": False,
-                "error": f"Missing required parameters: {', '.join(missing_params)}"
-            }
-        return {"valid": True}
-
     async def handle(self, state: WorkflowState, config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Handle the workflow state."""
         validation_result = await self.validate(state)
         if not validation_result.get("valid", False):
             return {"error": validation_result.get("error", "Parameter validation failed")}
+            
         definition_data = self.get_integration_definition(state)
         param_schema = self.get_parameter_schema(state)
         verification = self.get_verification_data(state)
+        
         action_map = {
             "install": "install/base.sh",
             "remove": "remove/base.sh",
             "verify": "verify/base.sh",
         }
+        
         if state.action not in action_map:
             return {"error": f"Unsupported action: {state.action}"}
+            
         template_rel = action_map[state.action]
         template_path = Path(__file__).parent / "common_templates" / template_rel
+        
         if not template_path.with_suffix(".j2").exists():
             # Try to look in common directories
             alt_paths = [
@@ -169,4 +140,46 @@ class IntegrationBase:
             "parameter_schema": param_schema,
             "verification_data": verification,
             "source": "IntegrationBase"
+        }
+
+    async def validate(self, state: WorkflowState) -> Dict[str, bool]:
+        """Validate the workflow state."""
+        return {"valid": True}
+
+    async def install(self, parameters: Dict[str, Any]) -> Dict[str, Any]:
+        """Install the integration."""
+        return {
+            "template_path": "install/base.sh.j2",
+            "template_data": {
+                "version": self.version,
+                "name": self.name
+            }
+        }
+
+    async def verify(self, parameters: Dict[str, Any]) -> Dict[str, Any]:
+        """Verify the integration installation."""
+        return {
+            "template_path": "verify/base.sh.j2",
+            "template_data": {
+                "version": self.version,
+                "name": self.name
+            }
+        }
+
+    async def uninstall(self, parameters: Dict[str, Any]) -> Dict[str, Any]:
+        """Uninstall the integration."""
+        return {
+            "template_path": "remove/base.sh.j2",
+            "template_data": {
+                "version": self.version,
+                "name": self.name
+            }
+        }
+
+    def get_info(self) -> Dict[str, str]:
+        """Get integration information."""
+        return {
+            "name": self.name,
+            "version": self.version,
+            "description": self.description
         }

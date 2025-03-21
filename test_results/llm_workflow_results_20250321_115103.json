@@ -1,0 +1,170 @@
+[
+  {
+    "name": "standard-install",
+    "target_name": "infrastructure-agent",
+    "integration_type": "infra_agent",
+    "action": "install",
+    "platform": "windows",
+    "generation_methods": {
+      "template": {
+        "method": "template",
+        "success": false,
+        "duration_seconds": 0.007439,
+        "error": "'WorkflowConfiguration' object has no attribute 'get'"
+      },
+      "llm": {
+        "method": "llm",
+        "success": false,
+        "duration_seconds": 2.891389,
+        "error": "LLM generation failed to produce a valid script"
+      },
+      "enhanced": {
+        "method": "enhanced",
+        "success": false,
+        "duration_seconds": 3.019457,
+        "error": "'WorkflowConfiguration' object has no attribute 'get'"
+      }
+    },
+    "script_execution": {}
+  },
+  {
+    "name": "custom-integration",
+    "target_name": "custom-integration",
+    "integration_type": "custom",
+    "action": "install",
+    "platform": "windows",
+    "generation_methods": {
+      "template": {
+        "method": "template",
+        "success": false,
+        "duration_seconds": 0.00713,
+        "error": "'WorkflowConfiguration' object has no attribute 'get'"
+      },
+      "llm": {
+        "method": "llm",
+        "success": false,
+        "duration_seconds": 2.878829,
+        "error": "LLM generation failed to produce a valid script"
+      },
+      "enhanced": {
+        "method": "enhanced",
+        "success": false,
+        "duration_seconds": 2.931164,
+        "error": "'WorkflowConfiguration' object has no attribute 'get'"
+      }
+    },
+    "script_execution": {}
+  },
+  {
+    "name": "uninstall",
+    "target_name": "infrastructure-agent",
+    "integration_type": "infra_agent",
+    "action": "uninstall",
+    "platform": "windows",
+    "generation_methods": {
+      "template": {
+        "method": "template",
+        "success": false,
+        "duration_seconds": 0.001234,
+        "error": "'WorkflowConfiguration' object has no attribute 'get'"
+      },
+      "llm": {
+        "method": "llm",
+        "success": false,
+        "duration_seconds": 2.93299,
+        "error": "LLM generation failed to produce a valid script"
+      },
+      "enhanced": {
+        "method": "enhanced",
+        "success": false,
+        "duration_seconds": 3.000408,
+        "error": "'WorkflowConfiguration' object has no attribute 'get'"
+      }
+    },
+    "script_execution": {}
+  },
+  {
+    "name": "minimal-params",
+    "target_name": "infrastructure-agent",
+    "integration_type": "infra_agent",
+    "action": "install",
+    "platform": "windows",
+    "generation_methods": {
+      "template": {
+        "method": "template",
+        "success": false,
+        "duration_seconds": 0.006523,
+        "error": "'WorkflowConfiguration' object has no attribute 'get'"
+      },
+      "llm": {
+        "method": "llm",
+        "success": false,
+        "duration_seconds": 2.875667,
+        "error": "LLM generation failed to produce a valid script"
+      },
+      "enhanced": {
+        "method": "enhanced",
+        "success": false,
+        "duration_seconds": 3.049116,
+        "error": "'WorkflowConfiguration' object has no attribute 'get'"
+      }
+    },
+    "script_execution": {}
+  },
+  {
+    "name": "complex-params",
+    "target_name": "infrastructure-agent",
+    "integration_type": "infra_agent",
+    "action": "install",
+    "platform": "windows",
+    "generation_methods": {
+      "template": {
+        "method": "template",
+        "success": false,
+        "duration_seconds": 0.001211,
+        "error": "'WorkflowConfiguration' object has no attribute 'get'"
+      },
+      "llm": {
+        "method": "llm",
+        "success": false,
+        "duration_seconds": 2.98303,
+        "error": "LLM generation failed to produce a valid script"
+      },
+      "enhanced": {
+        "method": "enhanced",
+        "success": false,
+        "duration_seconds": 2.866523,
+        "error": "'WorkflowConfiguration' object has no attribute 'get'"
+      }
+    },
+    "script_execution": {}
+  },
+  {
+    "name": "platform-specific",
+    "target_name": "infrastructure-agent",
+    "integration_type": "infra_agent",
+    "action": "install",
+    "platform": "windows",
+    "generation_methods": {
+      "template": {
+        "method": "template",
+        "success": false,
+        "duration_seconds": 0.0,
+        "error": "'WorkflowConfiguration' object has no attribute 'get'"
+      },
+      "llm": {
+        "method": "llm",
+        "success": false,
+        "duration_seconds": 3.033409,
+        "error": "LLM generation failed to produce a valid script"
+      },
+      "enhanced": {
+        "method": "enhanced",
+        "success": false,
+        "duration_seconds": 2.899576,
+        "error": "'WorkflowConfiguration' object has no attribute 'get'"
+      }
+    },
+    "script_execution": {}
+  }
+]

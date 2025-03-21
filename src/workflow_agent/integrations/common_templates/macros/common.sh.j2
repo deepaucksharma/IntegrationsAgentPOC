@@ -1,34 +1,94 @@
 # Common utility functions and macros
 
-{% macro log_message(level, message) %}
-timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-echo "[${timestamp}] [{{ level }}] {{ message }}"
+{# Common logging macro #}
+{% macro log_message(level, message) -%}
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] [{{ level }}] {{ message }}"
+{%- endmacro %}
+
+{# Error handling macro #}
+{% macro handle_error(message) -%}
+{{ log_message('ERROR', message) }}
+exit 1
+{%- endmacro %}
+
+{# Common shell script macros #}
+{% macro setup_logging() %}
+# Set up logging
+LOG_FILE="/var/log/integration_install.log"
+exec 1> >(tee -a "$LOG_FILE")
+exec 2>&1
+
+log() {
+    {{ log_message('INFO', '$1') }}
+}
+
+log_info() {
+    {{ log_message('INFO', '$1') }}
+}
+
+log_error() {
+    {{ log_message('ERROR', '$1') }} >&2
+}
+
+log_debug() {
+    if [ "${DEBUG:-0}" = "1" ]; then
+        {{ log_message('DEBUG', '$1') }}
+    fi
+}
+{% endmacro %}
+
+{% macro error_handling() %}
+# Error handling
+set -e
+trap '{{ log_message('ERROR', 'Command failed with exit code $? at line $LINENO') }}' ERR
 {% endmacro %}
 
 {% macro check_prerequisites() %}
+# Check prerequisites
+check_command() {
+    if ! command -v "$1" >/dev/null 2>&1; then
+        {{ handle_error('Required command not found: $1') }}
+        return 1
+    fi
+}
+
 # Check if required tools are available
-{% for tool in template_data.required_tools %}
+{% for tool in template_data.required_tools | default([]) %}
 if ! command -v {{ tool }} &> /dev/null; then
-    {{ log_message('ERROR', tool + ' is required but not found') }}
-    exit 1
+    {{ handle_error(tool + ' is required but not found') }}
 fi
 {% endfor %}
 {% endmacro %}
 
-{% macro handle_error(message) %}
-{{ log_message('ERROR', message) }}
-{% if system_context.error_handling.continue_on_error %}
-return 1
-{% else %}
-exit 1
-{% endif %}
+{% macro check_command(cmd) %}
+if ! command -v {{ cmd }} >/dev/null 2>&1; then
+    {{ handle_error('Required command not found: ' + cmd) }}
+fi
 {% endmacro %}
 
-{% macro backup_file(file_path) %}
-if [ -f "{{ file_path }}" ]; then
-    backup_path="{{ file_path }}.bak.$(date +%Y%m%d_%H%M%S)"
-    cp "{{ file_path }}" "${backup_path}"
-    {{ log_message('INFO', 'Created backup: ' + backup_path) }}
+{% macro check_file(path) %}
+if [ ! -f "{{ path }}" ]; then
+    {{ handle_error('Required file not found: ' + path) }}
+fi
+{% endmacro %}
+
+{% macro check_directory(path) %}
+if [ ! -d "{{ path }}" ]; then
+    {{ handle_error('Required directory not found: ' + path) }}
+fi
+{% endmacro %}
+
+{% macro backup_file(path) %}
+if [ -f "{{ path }}" ]; then
+    cp "{{ path }}" "{{ path }}.bak.$(date +%Y%m%d_%H%M%S)"
+    {{ log_message('INFO', 'Created backup: ' + path + '.bak') }}
+fi
+{% endmacro %}
+
+{% macro restore_file(path) %}
+if [ -f "{{ path }}.bak" ]; then
+    mv "{{ path }}.bak" "{{ path }}"
+    {{ log_message('INFO', 'Restored backup: ' + path) }}
 fi
 {% endmacro %}
 
@@ -38,87 +98,4 @@ if [ -d "${TEMP_DIR}" ]; then
     rm -rf "${TEMP_DIR}"
     {{ log_message('INFO', 'Cleaned up temporary directory') }}
 fi
-{% endmacro %}
-
-{# Common logging macro #}
-{% macro log_message(level, message) -%}
-echo "[`date +'%Y-%m-%d %H:%M:%S'`] [{{ level }}] {{ message }}"
-{%- endmacro %}
-
-{# Error handling macro #}
-{% macro handle_error(cmd, message) -%}
-{{ cmd }} || { echo "[`date +'%Y-%m-%d %H:%M:%S'`] [ERROR] {{ message }}"; exit 1; }
-{%- endmacro %}
-
-{# Common shell script macros #}
-{% macro setup_logging() %}
-# Set up logging
-log() {
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"
-}
-
-log_info() {
-    log "INFO: $1"
-}
-
-log_error() {
-    log "ERROR: $1" >&2
-}
-
-log_debug() {
-    if [ "${DEBUG:-0}" = "1" ]; then
-        log "DEBUG: $1"
-    fi
-}
-{% endmacro %}
-
-{% macro error_handling() %}
-# Error handling
-set -e
-trap 'log_error "Command failed with exit code $? at line $LINENO"' ERR
-{% endmacro %}
-
-{% macro check_prerequisites() %}
-# Check prerequisites
-check_command() {
-    if ! command -v "$1" >/dev/null 2>&1; then
-        log_error "Required command not found: $1"
-        return 1
-    fi
-}
-{% endmacro %}
-
-# Common bash macros for error handling and logging
-
-function log_message() {
-    local level=$1
-    local message=$2
-    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-    echo "$timestamp [$level] $message"
-}
-
-function handle_error() {
-    local message=$1
-    log_message "ERROR" "$message"
-    exit 1
-}
-
-function check_prerequisites() {
-    local required_tools=("$@")
-    for tool in "${required_tools[@]}"; do
-        if ! command -v "$tool" &> /dev/null; then
-            handle_error "Required tool not found: $tool"
-        fi
-    done
-}
-
-{% macro setup_logging() %}
-LOG_FILE="/var/log/integration_install.log"
-exec 1> >(tee -a "$LOG_FILE")
-exec 2>&1
-{% endmacro %}
-
-{% macro error_handling() %}
-set -e
-trap 'echo "Error on line $LINENO"' ERR
 {% endmacro %}

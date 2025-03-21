@@ -6,6 +6,9 @@ from typing import Any, Dict, List, Optional, Set
 from copy import deepcopy
 from datetime import datetime
 from uuid import UUID, uuid4
+import logging
+
+logger = logging.getLogger(__name__)
 
 class Change(BaseModel):
     """Represents a change made during workflow execution."""
@@ -21,12 +24,12 @@ class Change(BaseModel):
 
 class ExecutionMetrics(BaseModel):
     """Metrics collected during workflow execution."""
-    start_time: datetime = Field(default_factory=datetime.utcnow)
+    start_time: datetime = Field(default_factory=datetime.now)
     end_time: Optional[datetime] = None
     duration: float = 0.0
     memory_usage: float = 0.0
     cpu_usage: float = 0.0
-    disk_io: Dict[str, float] = Field(default_factory=dict)
+    disk_io: Dict[str, int] = Field(default_factory=dict)
 
     class Config:
         frozen = True
@@ -53,7 +56,7 @@ class WorkflowState(BaseModel):
     parameters: Dict[str, Any] = Field(default_factory=dict)
     template_data: Dict[str, Any] = Field(default_factory=dict)
     system_context: Dict[str, Any] = Field(default_factory=dict)
-    changes: List[Change] = Field(default_factory=list)
+    changes: List[Dict[str, Any]] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)
     messages: List[str] = Field(default_factory=list)
     
@@ -62,15 +65,15 @@ class WorkflowState(BaseModel):
     template_key: Optional[str] = None
     isolation_method: Optional[str] = None
     transaction_id: Optional[str] = None
-    execution_id: Optional[str] = None
+    execution_id: str = Field(default_factory=lambda: str(uuid4()))
     error: Optional[str] = None
-    metrics: Optional[ExecutionMetrics] = None
+    metrics: ExecutionMetrics = Field(default_factory=ExecutionMetrics)
     output: Optional[OutputData] = None
     
     # State tracking
     state_id: UUID = Field(default_factory=uuid4)
     parent_state_id: Optional[UUID] = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=datetime.now)
     modified_fields: Set[str] = Field(default_factory=set)
 
     class Config:
@@ -149,3 +152,33 @@ class WorkflowState(BaseModel):
     def _get_parent_state(self, parent_id: Optional[UUID]) -> Optional['WorkflowState']:
         """Get parent state - to be implemented by state management system."""
         return None  # Placeholder - actual implementation would retrieve from state store
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert state to dictionary."""
+        return self.model_dump()
+
+    def update(self, data: Dict[str, Any]) -> None:
+        """Update state with new data."""
+        for key, value in data.items():
+            if hasattr(self, key):
+                setattr(self, key, value)
+                self.modified_fields.add(key)
+
+    def merge(self, other: 'WorkflowState') -> None:
+        """Merge another state into this one."""
+        data = other.model_dump()
+        self.update(data)
+
+    def clone(self) -> 'WorkflowState':
+        """Create a copy of this state."""
+        data = self.model_dump()
+        data['parent_state_id'] = self.state_id
+        data['state_id'] = uuid4()
+        data['created_at'] = datetime.now()
+        data['modified_fields'] = set()
+        return WorkflowState(**data)
+
+    def get_modified_data(self) -> Dict[str, Any]:
+        """Get only modified fields."""
+        data = self.model_dump()
+        return {k: v for k, v in data.items() if k in self.modified_fields}

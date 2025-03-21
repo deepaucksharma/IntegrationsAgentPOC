@@ -1,0 +1,40 @@
+{
+  "action": "install",
+  "target_name": "custom-integration",
+  "integration_type": "custom",
+  "parameters": {
+    "integration_url": "https://example.com/custom-integration",
+    "config_path": "C:\\Program Files\\New Relic\\newrelic-infra\\integrations.d\\"
+  },
+  "template_data": {
+    "remote_docs": {
+      "integration_type": "custom",
+      "mock": true,
+      "installation_steps": [
+        "Download the integration package",
+        "Configure the integration",
+        "Start the integration service"
+      ]
+    },
+    "docs": {
+      "integration_type": "custom",
+      "mock": true,
+      "installation_steps": [
+        "Download the integration package",
+        "Configure the integration",
+        "Start the integration service"
+      ]
+    },
+    "platform_specific": {
+      "prerequisites": [],
+      "installation_methods": [],
+      "configuration_options": {},
+      "verification_steps": []
+    },
+    "platform_info": {
+      "system": "windows",
+      "distribution": "windows",
+      "version": "10.0"
+    }
+  }
+}

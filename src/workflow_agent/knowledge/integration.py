@@ -24,14 +24,18 @@ class DynamicIntegrationKnowledge:
             # Filter and enhance the documentation data
             platform_specific_docs = self._filter_for_platform(docs, platform)
             
-            # Update the state with both full and filtered documentation (with defensive check)
+            # Get installation methods
+            installation_methods = self._get_installation_methods(docs, platform)
+            
+            # Update the state with documentation and installation data
             if not hasattr(state, 'template_data') or state.template_data is None:
                 state.template_data = {}
                 
             state.template_data.update({
                 "docs": docs,
                 "platform_specific": platform_specific_docs,
-                "platform_info": platform
+                "platform_info": platform,
+                "installation_methods": installation_methods
             })
             
             logger.info("Successfully enhanced workflow state with documentation data")
@@ -41,86 +45,72 @@ class DynamicIntegrationKnowledge:
             logger.error(f"Failed to enhance workflow state: {e}")
             raise
 
-    def _get_platform_info(self, system_context: Dict[str, Any]) -> Dict[str, str]:
-        """Extracts platform information from system context."""
-        platform_info = {
-            "system": system_context.get("platform", {}).get("system", "").lower(),
-            "distribution": system_context.get("platform", {}).get("distribution", "").lower(),
-            "version": system_context.get("platform", {}).get("version", "")
+    def _get_platform_info(self, system_context: Dict[str, Any]) -> Dict[str, Any]:
+        """Extract platform information from system context."""
+        platform_info = system_context.get("platform", {})
+        return {
+            "system": platform_info.get("system", "unknown").lower(),
+            "release": platform_info.get("release", "unknown"),
+            "version": platform_info.get("version", "unknown"),
+            "architecture": platform_info.get("architecture", "unknown").lower()
         }
-        
-        # Normalize platform names
-        if platform_info["system"] == "linux":
-            if "ubuntu" in platform_info["distribution"]:
-                platform_info["distribution"] = "ubuntu"
-            elif any(dist in platform_info["distribution"] for dist in ["rhel", "centos", "fedora"]):
-                platform_info["distribution"] = "rhel"
-        elif "win" in platform_info["system"]:
-            platform_info["system"] = "windows"
-        elif "darwin" in platform_info["system"] or "mac" in platform_info["system"]:
-            platform_info["system"] = "macos"
-        
-        return platform_info
 
-    def _filter_for_platform(self, docs: Dict[str, Any], platform: Dict[str, str]) -> Dict[str, Any]:
-        """Filters documentation based on the platform."""
-        filtered_docs = {
-            "prerequisites": [],
-            "installation_methods": [],
-            "configuration_options": docs.get("configuration_options", {}),
-            "verification_steps": docs.get("verification_steps", [])
-        }
+    def _filter_for_platform(self, docs: Dict[str, Any], platform: Dict[str, Any]) -> Dict[str, Any]:
+        """Filter documentation for specific platform."""
+        platform_docs = {}
+        system = platform["system"]
         
-        # Filter prerequisites
-        for prereq in docs.get("prerequisites", []):
-            if self._is_relevant_for_platform(prereq, platform):
-                filtered_docs["prerequisites"].append(prereq)
-        
-        # Filter installation methods
-        for method in docs.get("installation_methods", []):
-            if self._is_method_compatible(method, platform):
-                filtered_docs["installation_methods"].append(method)
-        
-        return filtered_docs
+        for section, content in docs.items():
+            if isinstance(content, dict):
+                if system in content:
+                    platform_docs[section] = content[system]
+                elif "common" in content:
+                    platform_docs[section] = content["common"]
+            else:
+                platform_docs[section] = content
+                
+        return platform_docs
 
-    def _is_relevant_for_platform(self, text: str, platform: Dict[str, str]) -> bool:
-        """Determines if a text snippet is relevant for the current platform."""
-        text_lower = text.lower()
+    def _get_installation_methods(self, docs: Dict[str, Any], platform: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Extract installation methods from documentation."""
+        methods = []
+        system = platform["system"]
         
-        # If no platform-specific markers are found, consider it relevant
-        if not any(os in text_lower for os in ["windows", "linux", "macos"]):
-            return True
+        # Get installation methods from docs
+        install_data = docs.get("installation", {})
+        
+        # Add platform-specific methods
+        if system in install_data:
+            methods.extend(self._parse_installation_methods(install_data[system]))
             
-        # Check if text mentions current platform
-        if platform["system"] in text_lower:
-            return True
+        # Add common methods
+        if "common" in install_data:
+            methods.extend(self._parse_installation_methods(install_data["common"]))
             
-        # Check distribution-specific relevance
-        if platform["system"] == "linux" and platform["distribution"] in text_lower:
-            return True
+        # If no methods found, add default method
+        if not methods:
+            methods.append({
+                "name": "default",
+                "type": "script",
+                "description": "Default installation method",
+                "template": "install/base.sh.j2" if system == "linux" else "install/base.ps1.j2"
+            })
             
-        return False
+        return methods
 
-    def _is_method_compatible(self, method: Dict[str, Any], platform: Dict[str, str]) -> bool:
-        """Checks if an installation method is compatible with the platform."""
-        platform_compat = method.get("platform_compatibility", [])
+    def _parse_installation_methods(self, data: Any) -> List[Dict[str, Any]]:
+        """Parse installation methods from documentation data."""
+        methods = []
         
-        # If no platform compatibility is specified, consider it compatible
-        if not platform_compat:
-            return True
-            
-        # Check system compatibility
-        if platform["system"] in platform_compat:
-            return True
-            
-        # Check distribution compatibility for Linux
-        if platform["system"] == "linux" and platform["distribution"] in platform_compat:
-            return True
-            
-        # If the method explicitly mentions another platform, it's incompatible
-        if any(other_platform in platform_compat for other_platform in ["windows", "linux", "macos"] 
-               if other_platform != platform["system"]):
-            return False
-            
-        # Default to compatible if no definitive incompatibility
-        return True
+        if isinstance(data, dict):
+            for method_name, method_data in data.items():
+                if isinstance(method_data, dict):
+                    methods.append({
+                        "name": method_name,
+                        "type": method_data.get("type", "script"),
+                        "description": method_data.get("description", ""),
+                        "template": method_data.get("template", ""),
+                        "requirements": method_data.get("requirements", [])
+                    })
+                    
+        return methods

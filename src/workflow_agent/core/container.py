@@ -32,8 +32,10 @@ class ComponentRegistry:
 class DependencyContainer:
     """Container for managing component dependencies and lifecycle."""
     
-    def __init__(self, config: Optional[WorkflowConfiguration] = None):
+    def __init__(self, config: Dict[str, Any]):
         self.config = config
+        self._components = {}
+        self._initialized = False
         self.registry = ComponentRegistry()
         self._setup_dependencies()
 
@@ -91,6 +93,9 @@ class DependencyContainer:
             for component_name in self._get_initialization_order():
                 await self._initialize_component(component_name)
                 
+            self._initialized = True
+            logger.info("Container initialization complete")
+                
         except Exception as e:
             logger.error(f"Failed to initialize container: {e}")
             raise InitializationError(
@@ -109,19 +114,27 @@ class DependencyContainer:
                 except Exception as e:
                     logger.error(f"Error cleaning up component {component_name}: {e}")
 
+        self.registry.components.clear()
+        self._initialized = False
+        logger.info("Container cleanup complete")
+
     def register(self, name: str, component: Any) -> None:
         """Register a component with the container."""
+        self._components[name] = component
+        logger.debug(f"Registered component: {name}")
         self.registry.components[name] = component
         self.registry.initialized[name] = False
 
-    def get(self, name: str) -> Any:
-        """Get a component from the container."""
-        if name not in self.registry.components:
-            raise InitializationError(
-                f"Component {name} not found in container",
-                details={"available_components": list(self.registry.components.keys())}
-            )
-        return self.registry.components[name]
+    def get(self, name: str) -> Optional[Any]:
+        """Get a registered component."""
+        if not self._initialized:
+            raise InitializationError("Container not initialized")
+            
+        component = self._components.get(name)
+        if not component:
+            raise InitializationError(f"Component {name} not found in container")
+            
+        return component
 
     def _get_initialization_order(self) -> list[str]:
         """Get component initialization order based on dependencies."""
@@ -154,6 +167,7 @@ class DependencyContainer:
             
         try:
             if hasattr(component, 'initialize'):
+                logger.debug(f"Initializing component: {name}")
                 await component.initialize()
             self.registry.initialized[name] = True
         except Exception as e:
@@ -163,13 +177,21 @@ class DependencyContainer:
             )
 
     def validate_initialization(self) -> None:
-        """Validate that all components are properly initialized."""
-        uninitialized = [
-            name for name, initialized in self.registry.initialized.items()
-            if not initialized
+        """Validate container initialization."""
+        if not self._initialized:
+            raise InitializationError("Container not initialized")
+            
+        # Check required components
+        required_components = [
+            'integration_manager',
+            'integration_registry',
+            'recovery_manager',
+            'script_generator',
+            'storage_manager',
+            'verification_manager',
+            'documentation_handler'
         ]
-        if uninitialized:
-            raise InitializationError(
-                "Some components are not initialized",
-                details={"uninitialized_components": uninitialized}
-            ) 
+        
+        missing = [name for name in required_components if name not in self._components]
+        if missing:
+            raise InitializationError(f"Missing required components: {', '.join(missing)}") 

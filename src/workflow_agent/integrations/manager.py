@@ -8,7 +8,8 @@ import sys
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Type
 
-from .base import BaseIntegration
+from .base import IntegrationBase
+from .registry import IntegrationRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -17,16 +18,51 @@ class IntegrationManager:
     
     def __init__(self, plugin_dirs: List[str]):
         self.plugin_dirs = plugin_dirs
-        self._integrations: Dict[str, Type[BaseIntegration]] = {}
-        self._loaded_integrations: Dict[str, BaseIntegration] = {}
+        self._integrations: Dict[str, Type[IntegrationBase]] = {}
+        self._loaded_integrations: Dict[str, IntegrationBase] = {}
         
     async def initialize(self) -> None:
         """Initialize the integration manager."""
         logger.info("Initializing integration manager...")
+        
+        # First load built-in integrations
+        await self._load_builtin_integrations()
+        
+        # Then load external plugins
         for plugin_dir in self.plugin_dirs:
             await self._load_plugins_from_dir(plugin_dir)
+            
         logger.info(f"Loaded {len(self._integrations)} integration types")
         
+    async def _load_builtin_integrations(self) -> None:
+        """Load built-in integrations."""
+        try:
+            # Get the integrations directory path
+            package_path = Path(__file__).parent
+            
+            # Load each integration module
+            for item in package_path.iterdir():
+                if item.is_dir() and not item.name.startswith('__'):
+                    try:
+                        module_name = f"{__package__}.{item.name}"
+                        module = importlib.import_module(module_name)
+                        
+                        # Look for IntegrationBase subclasses
+                        for attr_name in dir(module):
+                            attr = getattr(module, attr_name)
+                            if (isinstance(attr, type) and 
+                                issubclass(attr, IntegrationBase) and 
+                                attr is not IntegrationBase):
+                                integration_instance = attr()
+                                self._integrations[integration_instance.get_name()] = attr
+                                logger.info(f"Loaded built-in integration: {attr_name}")
+                                
+                    except Exception as e:
+                        logger.warning(f"Failed to load built-in integration {item.name}: {e}")
+                        
+        except Exception as e:
+            logger.error(f"Error loading built-in integrations: {e}")
+                
     async def _load_plugins_from_dir(self, plugin_dir: str) -> None:
         """Load plugins from a directory."""
         try:
@@ -43,6 +79,7 @@ class IntegrationManager:
             for item in plugin_path.iterdir():
                 if item.is_dir() and not item.name.startswith('__'):
                     await self._load_plugin(item)
+                    
         except Exception as e:
             logger.error(f"Error loading plugins from {plugin_dir}: {e}")
             
@@ -66,17 +103,18 @@ class IntegrationManager:
             for item_name in dir(module):
                 item = getattr(module, item_name)
                 if (isinstance(item, type) and 
-                    issubclass(item, BaseIntegration) and 
-                    item != BaseIntegration):
+                    issubclass(item, IntegrationBase) and 
+                    item != IntegrationBase):
                     integration_instance = item()
-                    self._integrations[integration_instance.name] = item
-                    logger.info(f"Loaded integration: {item_name} (name: {integration_instance.name})")
+                    self._integrations[integration_instance.get_name()] = item
+                    logger.info(f"Loaded plugin integration: {item_name}")
                     
         except Exception as e:
             logger.error(f"Error loading plugin {plugin_dir.name}: {e}")
             
-    def get_integration(self, name: str) -> Optional[BaseIntegration]:
+    def get_integration(self, name: str) -> Optional[IntegrationBase]:
         """Get an integration instance by name."""
+        name = name.lower()
         if name not in self._loaded_integrations:
             if name not in self._integrations:
                 return None

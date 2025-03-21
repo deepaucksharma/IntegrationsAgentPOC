@@ -1,0 +1,224 @@
+[
+  {
+    "name": "standard-install",
+    "target_name": "infrastructure-agent",
+    "integration_type": "infra_agent",
+    "action": "install",
+    "platform": "windows",
+    "generation_methods": {
+      "template": {
+        "method": "template",
+        "success": true,
+        "duration_seconds": 0.006108,
+        "script_path": "generated_scripts\\infrastructure-agent_install_template_20250321_122132.ps1",
+        "script_size": 2977
+      },
+      "llm": {
+        "method": "llm",
+        "success": false,
+        "duration_seconds": 1.281415,
+        "error": "Gemini generation error: 404 models/gemini-pro is not found for API version v1beta, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods."
+      },
+      "enhanced": {
+        "method": "enhanced",
+        "success": false,
+        "error": "EnhancedScriptGenerator.generate_script() takes 2 positional arguments but 3 were given"
+      }
+    },
+    "script_execution": {
+      "template": {
+        "success": true,
+        "duration_seconds": 0.0,
+        "error": null,
+        "exit_code": null,
+        "stdout_size": 0,
+        "stderr_size": 0
+      }
+    }
+  },
+  {
+    "name": "custom-integration",
+    "target_name": "custom-integration",
+    "integration_type": "custom",
+    "action": "install",
+    "platform": "windows",
+    "generation_methods": {
+      "template": {
+        "method": "template",
+        "success": true,
+        "duration_seconds": 0.012904,
+        "script_path": "generated_scripts\\custom-integration_install_template_20250321_122134.ps1",
+        "script_size": 1867
+      },
+      "llm": {
+        "method": "llm",
+        "success": false,
+        "duration_seconds": 3.000496,
+        "error": "Gemini generation error: 404 models/gemini-pro is not found for API version v1beta, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods."
+      },
+      "enhanced": {
+        "method": "enhanced",
+        "success": false,
+        "error": "EnhancedScriptGenerator.generate_script() takes 2 positional arguments but 3 were given"
+      }
+    },
+    "script_execution": {
+      "template": {
+        "success": true,
+        "duration_seconds": 0.0,
+        "error": null,
+        "exit_code": null,
+        "stdout_size": 0,
+        "stderr_size": 0
+      }
+    }
+  },
+  {
+    "name": "uninstall",
+    "target_name": "infrastructure-agent",
+    "integration_type": "infra_agent",
+    "action": "uninstall",
+    "platform": "windows",
+    "generation_methods": {
+      "template": {
+        "method": "template",
+        "success": true,
+        "duration_seconds": 0.00464,
+        "script_path": "generated_scripts\\infrastructure-agent_uninstall_template_20250321_122137.ps1",
+        "script_size": 1227
+      },
+      "llm": {
+        "method": "llm",
+        "success": false,
+        "duration_seconds": 1.97898,
+        "error": "Gemini generation error: 404 models/gemini-pro is not found for API version v1beta, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods."
+      },
+      "enhanced": {
+        "method": "enhanced",
+        "success": false,
+        "error": "EnhancedScriptGenerator.generate_script() takes 2 positional arguments but 3 were given"
+      }
+    },
+    "script_execution": {
+      "template": {
+        "success": true,
+        "duration_seconds": 0.0,
+        "error": null,
+        "exit_code": null,
+        "stdout_size": 0,
+        "stderr_size": 0
+      }
+    }
+  },
+  {
+    "name": "minimal-params",
+    "target_name": "infrastructure-agent",
+    "integration_type": "infra_agent",
+    "action": "install",
+    "platform": "windows",
+    "generation_methods": {
+      "template": {
+        "method": "template",
+        "success": true,
+        "duration_seconds": 0.0,
+        "script_path": "generated_scripts\\infrastructure-agent_install_template_20250321_122139.ps1",
+        "script_size": 2574
+      },
+      "llm": {
+        "method": "llm",
+        "success": false,
+        "duration_seconds": 2.949079,
+        "error": "Gemini generation error: 404 models/gemini-pro is not found for API version v1beta, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods."
+      },
+      "enhanced": {
+        "method": "enhanced",
+        "success": false,
+        "error": "EnhancedScriptGenerator.generate_script() takes 2 positional arguments but 3 were given"
+      }
+    },
+    "script_execution": {
+      "template": {
+        "success": true,
+        "duration_seconds": 0.0,
+        "error": null,
+        "exit_code": null,
+        "stdout_size": 0,
+        "stderr_size": 0
+      }
+    }
+  },
+  {
+    "name": "complex-params",
+    "target_name": "infrastructure-agent",
+    "integration_type": "infra_agent",
+    "action": "install",
+    "platform": "windows",
+    "generation_methods": {
+      "template": {
+        "method": "template",
+        "success": true,
+        "duration_seconds": 0.0,
+        "script_path": "generated_scripts\\infrastructure-agent_install_template_20250321_122142.ps1",
+        "script_size": 2644
+      },
+      "llm": {
+        "method": "llm",
+        "success": false,
+        "duration_seconds": 1.100693,
+        "error": "Gemini generation error: 404 models/gemini-pro is not found for API version v1beta, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods."
+      },
+      "enhanced": {
+        "method": "enhanced",
+        "success": false,
+        "error": "EnhancedScriptGenerator.generate_script() takes 2 positional arguments but 3 were given"
+      }
+    },
+    "script_execution": {
+      "template": {
+        "success": true,
+        "duration_seconds": 0.0,
+        "error": null,
+        "exit_code": null,
+        "stdout_size": 0,
+        "stderr_size": 0
+      }
+    }
+  },
+  {
+    "name": "platform-specific",
+    "target_name": "infrastructure-agent",
+    "integration_type": "infra_agent",
+    "action": "install",
+    "platform": "windows",
+    "generation_methods": {
+      "template": {
+        "method": "template",
+        "success": true,
+        "duration_seconds": 0.0,
+        "script_path": "generated_scripts\\infrastructure-agent_install_template_20250321_122143.ps1",
+        "script_size": 2643
+      },
+      "llm": {
+        "method": "llm",
+        "success": false,
+        "duration_seconds": 1.068704,
+        "error": "Gemini generation error: 404 models/gemini-pro is not found for API version v1beta, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods."
+      },
+      "enhanced": {
+        "method": "enhanced",
+        "success": false,
+        "error": "EnhancedScriptGenerator.generate_script() takes 2 positional arguments but 3 were given"
+      }
+    },
+    "script_execution": {
+      "template": {
+        "success": true,
+        "duration_seconds": 0.0,
+        "error": null,
+        "exit_code": null,
+        "stdout_size": 0,
+        "stderr_size": 0
+      }
+    }
+  }
+]

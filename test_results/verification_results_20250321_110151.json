@@ -1,0 +1,58 @@
+[
+  {
+    "name": "infra-agent-basic",
+    "target_name": "infrastructure-agent",
+    "integration_type": "infra_agent",
+    "platform": "windows",
+    "script_generation": true,
+    "script_execution": true,
+    "direct_verification": true,
+    "script_path": "generated_scripts\\verification\\infrastructure-agent_verify_20250321_110150.ps1",
+    "success": true
+  },
+  {
+    "name": "infra-agent-advanced",
+    "target_name": "infrastructure-agent",
+    "integration_type": "infra_agent",
+    "platform": "windows",
+    "script_generation": true,
+    "script_execution": true,
+    "direct_verification": true,
+    "script_path": "generated_scripts\\verification\\infrastructure-agent_verify_20250321_110150.ps1",
+    "success": true
+  },
+  {
+    "name": "custom-integration",
+    "target_name": "custom-integration",
+    "integration_type": "custom",
+    "platform": "windows",
+    "script_generation": true,
+    "script_execution": false,
+    "direct_verification": true,
+    "script_path": "generated_scripts\\verification\\custom-integration_verify_20250321_110150.ps1",
+    "execution_error": "Workflow failed: Integration custom not found",
+    "success": true
+  },
+  {
+    "name": "multi-verification",
+    "target_name": "infrastructure-agent",
+    "integration_type": "infra_agent",
+    "platform": "windows",
+    "script_generation": true,
+    "script_execution": true,
+    "direct_verification": true,
+    "script_path": "generated_scripts\\verification\\infrastructure-agent_verify_20250321_110150.ps1",
+    "success": true
+  },
+  {
+    "name": "failed-verification",
+    "target_name": "nonexistent-service",
+    "integration_type": "infra_agent",
+    "platform": "windows",
+    "script_generation": true,
+    "script_execution": true,
+    "direct_verification": true,
+    "script_path": "generated_scripts\\verification\\nonexistent-service_verify_20250321_110151.ps1",
+    "success": true
+  }
+]

@@ -1,0 +1,328 @@
+{
+  "install": {
+    "action": "install",
+    "target_name": "infrastructure-agent",
+    "integration_type": "infra_agent",
+    "parameters": {
+      "license_key": "test123",
+      "host": "localhost",
+      "port": "8080",
+      "log_level": "INFO",
+      "install_dir": "C:\\Program Files\\Test Agent",
+      "config_path": "C:\\ProgramData\\Test Agent\\config",
+      "log_path": "C:\\ProgramData\\Test Agent\\logs"
+    },
+    "template_data": {
+      "license_key": "test123",
+      "host": "localhost"
+    },
+    "system_context": {
+      "platform": {
+        "system": "Windows",
+        "release": "10",
+        "version": "10.0.19045",
+        "architecture": "AMD64",
+        "processor": "AMD64 Family 23 Model 113 Stepping 0, AuthenticAMD",
+        "hostname": "DESKTOP-DT6CF2J"
+      },
+      "docker_available": true,
+      "package_managers": {
+        "apt": false,
+        "yum": false,
+        "dnf": false,
+        "pacman": false,
+        "brew": false
+      },
+      "user": {
+        "username": "hi",
+        "uid": -1,
+        "home": "C:\\Users\\hi"
+      },
+      "hardware": {
+        "cpu_count": 24,
+        "memory_total": 34280882176,
+        "memory_available": 24686182400
+      }
+    },
+    "changes": [],
+    "warnings": [],
+    "messages": [
+      "Infrastructure agent installed successfully on localhost"
+    ],
+    "script": null,
+    "template_key": null,
+    "isolation_method": null,
+    "transaction_id": null,
+    "execution_id": "52cc6795-d100-4a9a-8c57-2073e56d5a72",
+    "error": null,
+    "metrics": {
+      "start_time": "2025-03-21 05:37:18.784735",
+      "end_time": null,
+      "duration": 0.0,
+      "memory_usage": 0.0,
+      "cpu_usage": 0.0,
+      "disk_io": {}
+    },
+    "output": null,
+    "state_id": "c013cb6f-78d2-4af9-96b6-36f6c27b4605",
+    "parent_state_id": "25dab15b-579b-4e56-b634-1c2c71834849",
+    "created_at": "2025-03-21 05:37:18.784735",
+    "modified_fields": "{'template_data'}"
+  },
+  "verify": {
+    "action": "verify",
+    "target_name": "infrastructure-agent",
+    "integration_type": "infra_agent",
+    "parameters": {
+      "host": "localhost",
+      "port": "8080",
+      "install_dir": "C:\\Program Files\\Test Agent",
+      "config_path": "C:\\ProgramData\\Test Agent\\config",
+      "log_path": "C:\\ProgramData\\Test Agent\\logs"
+    },
+    "template_data": {
+      "is_installed": true,
+      "is_running": true
+    },
+    "system_context": {
+      "platform": {
+        "system": "Windows",
+        "release": "10",
+        "version": "10.0.19045",
+        "architecture": "AMD64",
+        "processor": "AMD64 Family 23 Model 113 Stepping 0, AuthenticAMD",
+        "hostname": "DESKTOP-DT6CF2J"
+      },
+      "docker_available": true,
+      "package_managers": {
+        "apt": false,
+        "yum": false,
+        "dnf": false,
+        "pacman": false,
+        "brew": false
+      },
+      "user": {
+        "username": "hi",
+        "uid": -1,
+        "home": "C:\\Users\\hi"
+      },
+      "hardware": {
+        "cpu_count": 24,
+        "memory_total": 34280882176,
+        "memory_available": 24686465024
+      }
+    },
+    "changes": [],
+    "warnings": [],
+    "messages": [
+      "Infrastructure agent verification successful"
+    ],
+    "script": null,
+    "template_key": null,
+    "isolation_method": null,
+    "transaction_id": null,
+    "execution_id": "eb3b31fc-d9f0-47a0-b3f6-836b9becce7d",
+    "error": null,
+    "metrics": {
+      "start_time": "2025-03-21 05:37:18.830510",
+      "end_time": null,
+      "duration": 0.0,
+      "memory_usage": 0.0,
+      "cpu_usage": 0.0,
+      "disk_io": {}
+    },
+    "output": null,
+    "state_id": "607aa9bd-3842-4cfa-8ecd-15dfc4a5aca3",
+    "parent_state_id": "166784cb-d6d7-4f4d-8ed7-a6753b05272c",
+    "created_at": "2025-03-21 05:37:18.830510",
+    "modified_fields": "{'template_data'}"
+  },
+  "custom": {
+    "action": "install",
+    "target_name": "custom-integration",
+    "integration_type": "custom",
+    "parameters": {
+      "integration_url": "https://example.com/custom-integration",
+      "config_path": "C:\\Program Files\\New Relic\\newrelic-infra\\integrations.d\\"
+    },
+    "template_data": {},
+    "system_context": {
+      "platform": {
+        "system": "Windows",
+        "release": "10",
+        "version": "10.0.19045",
+        "architecture": "AMD64",
+        "processor": "AMD64 Family 23 Model 113 Stepping 0, AuthenticAMD",
+        "hostname": "DESKTOP-DT6CF2J"
+      },
+      "docker_available": true,
+      "package_managers": {
+        "apt": false,
+        "yum": false,
+        "dnf": false,
+        "pacman": false,
+        "brew": false
+      },
+      "user": {
+        "username": "hi",
+        "uid": -1,
+        "home": "C:\\Users\\hi"
+      },
+      "hardware": {
+        "cpu_count": 24,
+        "memory_total": 34280882176,
+        "memory_available": 24699404288
+      }
+    },
+    "changes": [],
+    "warnings": [],
+    "messages": [],
+    "script": null,
+    "template_key": null,
+    "isolation_method": null,
+    "transaction_id": null,
+    "execution_id": "42127ec1-41fa-49d7-a1e9-54b8c900d409",
+    "error": "Workflow failed: Integration custom not found",
+    "metrics": {
+      "start_time": "2025-03-21 05:37:18.886397",
+      "end_time": null,
+      "duration": 0.0,
+      "memory_usage": 0.0,
+      "cpu_usage": 0.0,
+      "disk_io": {}
+    },
+    "output": null,
+    "state_id": "a5659faa-6636-43dc-8654-f38132c990fa",
+    "parent_state_id": "8e09d653-9062-463f-9987-eb9011b6b198",
+    "created_at": "2025-03-21 05:37:18.887400",
+    "modified_fields": "{'error'}"
+  },
+  "uninstall": {
+    "action": "uninstall",
+    "target_name": "infrastructure-agent",
+    "integration_type": "infra_agent",
+    "parameters": {
+      "install_dir": "C:\\Program Files\\Test Agent",
+      "config_path": "C:\\ProgramData\\Test Agent\\config",
+      "log_path": "C:\\ProgramData\\Test Agent\\logs"
+    },
+    "template_data": {},
+    "system_context": {
+      "platform": {
+        "system": "Windows",
+        "release": "10",
+        "version": "10.0.19045",
+        "architecture": "AMD64",
+        "processor": "AMD64 Family 23 Model 113 Stepping 0, AuthenticAMD",
+        "hostname": "DESKTOP-DT6CF2J"
+      },
+      "docker_available": true,
+      "package_managers": {
+        "apt": false,
+        "yum": false,
+        "dnf": false,
+        "pacman": false,
+        "brew": false
+      },
+      "user": {
+        "username": "hi",
+        "uid": -1,
+        "home": "C:\\Users\\hi"
+      },
+      "hardware": {
+        "cpu_count": 24,
+        "memory_total": 34280882176,
+        "memory_available": 24707731456
+      }
+    },
+    "changes": [],
+    "warnings": [],
+    "messages": [
+      "Infrastructure agent uninstalled successfully"
+    ],
+    "script": null,
+    "template_key": null,
+    "isolation_method": null,
+    "transaction_id": null,
+    "execution_id": "bc20d0f5-02d0-4dfc-9577-49e2307f1243",
+    "error": null,
+    "metrics": {
+      "start_time": "2025-03-21 05:37:18.935397",
+      "end_time": null,
+      "duration": 0.0,
+      "memory_usage": 0.0,
+      "cpu_usage": 0.0,
+      "disk_io": {}
+    },
+    "output": null,
+    "state_id": "58e98fc2-2bc8-4d65-ad74-36f5029d55b7",
+    "parent_state_id": "55970894-db58-4a09-8cbc-8e408be71e03",
+    "created_at": "2025-03-21 05:37:18.936397",
+    "modified_fields": "{'messages'}"
+  },
+  "error": {
+    "action": "install",
+    "target_name": "infrastructure-agent",
+    "integration_type": "infra_agent",
+    "parameters": {
+      "host": "localhost",
+      "port": "8080"
+    },
+    "template_data": {
+      "license_key": null,
+      "host": "localhost"
+    },
+    "system_context": {
+      "platform": {
+        "system": "Windows",
+        "release": "10",
+        "version": "10.0.19045",
+        "architecture": "AMD64",
+        "processor": "AMD64 Family 23 Model 113 Stepping 0, AuthenticAMD",
+        "hostname": "DESKTOP-DT6CF2J"
+      },
+      "docker_available": true,
+      "package_managers": {
+        "apt": false,
+        "yum": false,
+        "dnf": false,
+        "pacman": false,
+        "brew": false
+      },
+      "user": {
+        "username": "hi",
+        "uid": -1,
+        "home": "C:\\Users\\hi"
+      },
+      "hardware": {
+        "cpu_count": 24,
+        "memory_total": 34280882176,
+        "memory_available": 24708386816
+      }
+    },
+    "changes": [],
+    "warnings": [],
+    "messages": [
+      "Infrastructure agent installed successfully on localhost"
+    ],
+    "script": null,
+    "template_key": null,
+    "isolation_method": null,
+    "transaction_id": null,
+    "execution_id": "1ab21c8b-808f-4f98-83b1-aa3b3b77ce96",
+    "error": null,
+    "metrics": {
+      "start_time": "2025-03-21 05:37:18.984621",
+      "end_time": null,
+      "duration": 0.0,
+      "memory_usage": 0.0,
+      "cpu_usage": 0.0,
+      "disk_io": {}
+    },
+    "output": null,
+    "state_id": "57cd80ef-0e3a-48aa-961c-b432aa8ae2ad",
+    "parent_state_id": "0329bd24-7bf6-4a8d-82e3-e5967292d158",
+    "created_at": "2025-03-21 05:37:18.984621",
+    "modified_fields": "{'template_data'}"
+  }
+}

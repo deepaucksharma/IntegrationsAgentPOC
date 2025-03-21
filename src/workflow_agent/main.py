@@ -62,11 +62,34 @@ class WorkflowAgent:
         logger.info("Logging configured with level: %s", self.config.log_level)
         logger.debug("Full configuration: %s", self.config.__dict__)
 
+    def _initialize_container(self) -> None:
+        """Initialize container with required components."""
+        from .integrations.manager import IntegrationManager
+        from .integrations.registry import IntegrationRegistry
+        from .recovery.manager import RecoveryManager
+        from .integrations.scripting import ScriptGenerator
+        from .integrations.storage import StorageManager
+        from .integrations.verification import VerificationManager
+        from .integrations.documentation import DocumentationHandler
+        
+        # Register core components
+        self.container.register('integration_registry', IntegrationRegistry())
+        self.container.register('integration_manager', IntegrationManager(self.config))
+        self.container.register('recovery_manager', RecoveryManager(self.config))
+        
+        # Register integration components
+        self.container.register('script_generator', 
+            ScriptGenerator(self.config.get('template_dir', './templates')))
+        self.container.register('storage_manager', 
+            StorageManager(self.config.get('storage_dir', './storage')))
+        self.container.register('verification_manager', VerificationManager())
+        self.container.register('documentation_handler', DocumentationHandler())
+
     async def initialize(self) -> None:
         """Initialize components with connection pooling and retries."""
         try:
             logger.info("Starting WorkflowAgent initialization...")
-            logger.debug("Initializing container with config: %s", self.config.__dict__)
+            await self._initialize_container()
             await self.container.initialize()
             
             logger.info("Validating container initialization...")
@@ -102,18 +125,35 @@ class WorkflowAgent:
                 raise WorkflowError(f"Unsupported action: {state.action}")
 
             # Update state with result
-            if result.get("status") == "success":
-                state = state.add_message(result["message"])
-                if "details" in result:
-                    state = state.evolve(template_data=result["details"])
+            if result:
+                if "template_path" in result:
+                    state = state.evolve(
+                        template_key=result["template_path"],
+                        template_data=result.get("template_data", {})
+                    )
+                elif "status" in result:
+                    if result["status"] == "success":
+                        state = state.add_message(result.get("message", "Operation completed successfully"))
+                        if "details" in result:
+                            state = state.evolve(template_data=result["details"])
+                    else:
+                        state = state.set_error(result.get("message", "Operation failed"))
+                else:
+                    state = state.set_error("Invalid result format from integration")
             else:
-                state = state.set_error(result.get("message", "Unknown error"))
+                state = state.set_error("No result returned from integration")
 
             logger.info("Workflow completed successfully")
             return state
             
+        except WorkflowError as e:
+            logger.error("Workflow error: %s", e)
+            return await self._handle_workflow_failure(state, e)
+        except InitializationError as e:
+            logger.error("Initialization error: %s", e)
+            return await self._handle_workflow_failure(state, e)
         except Exception as e:
-            logger.error("Workflow failed: %s", e)
+            logger.error("Unexpected error: %s", e, exc_info=True)
             return await self._handle_workflow_failure(state, e)
 
     async def close(self) -> None:
@@ -138,8 +178,8 @@ class WorkflowAgent:
 
     async def _handle_workflow_failure(self, state: WorkflowState, e: Exception) -> WorkflowState:
         """Handle workflow failure and perform recovery if needed."""
-        error_message = f"Workflow failed: {str(e)}"
-        logger.error(error_message, exc_info=True)
+        error_message = str(e)
+        logger.error("Workflow failed: %s", error_message)
         
         # Add error to state
         state = state.set_error(error_message)
@@ -148,10 +188,10 @@ class WorkflowAgent:
         if self.config.use_recovery:
             try:
                 recovery_manager = self.container.get('recovery_manager')
-                await recovery_manager.perform_rollback(state)
+                state = await recovery_manager.recover(state)
             except Exception as recovery_error:
-                logger.error(f"Recovery failed: {recovery_error}")
-                state = state.add_warning(f"Recovery failed: {str(recovery_error)}")
+                logger.error("Recovery failed: %s", recovery_error)
+                state = state.add_warning(f"Recovery failed: {recovery_error}")
         
         return state
 
@@ -179,10 +219,20 @@ def install(
             template_data={}
         )
         
-        # Run workflow
-        agent = WorkflowAgent()
-        asyncio.run(agent.run_workflow(state))
-        
+        async def run():
+            # Initialize and run workflow
+            agent = WorkflowAgent()
+            await agent.initialize()
+            try:
+                return await agent.run_workflow(state)
+            finally:
+                await agent.close()
+                
+        result = asyncio.run(run())
+        if result.has_error:
+            logger.error(f"Installation failed: {result.error}")
+            raise typer.Exit(1)
+            
     except Exception as e:
         logger.error(f"Installation failed: {e}")
         raise typer.Exit(1)
@@ -204,20 +254,30 @@ def verify(
             template_data={}
         )
         
-        # Run workflow
-        agent = WorkflowAgent()
-        asyncio.run(agent.run_workflow(state))
-        
+        async def run():
+            # Initialize and run workflow
+            agent = WorkflowAgent()
+            await agent.initialize()
+            try:
+                return await agent.run_workflow(state)
+            finally:
+                await agent.close()
+                
+        result = asyncio.run(run())
+        if result.has_error:
+            logger.error(f"Verification failed: {result.error}")
+            raise typer.Exit(1)
+            
     except Exception as e:
         logger.error(f"Verification failed: {e}")
         raise typer.Exit(1)
 
 @app.command()
-def uninstall(
+def remove(
     integration: str,
-    host: str = typer.Option("localhost", help="Target host for uninstallation")
+    host: str = typer.Option("localhost", help="Target host for removal")
 ):
-    """Uninstall an integration."""
+    """Remove an integration."""
     try:
         # Create workflow state
         state = WorkflowState(
@@ -229,13 +289,31 @@ def uninstall(
             template_data={}
         )
         
-        # Run workflow
-        agent = WorkflowAgent()
-        asyncio.run(agent.run_workflow(state))
-        
+        async def run():
+            # Initialize and run workflow
+            agent = WorkflowAgent()
+            await agent.initialize()
+            try:
+                return await agent.run_workflow(state)
+            finally:
+                await agent.close()
+                
+        result = asyncio.run(run())
+        if result.has_error:
+            logger.error(f"Removal failed: {result.error}")
+            raise typer.Exit(1)
+            
     except Exception as e:
-        logger.error(f"Uninstallation failed: {e}")
+        logger.error(f"Removal failed: {e}")
         raise typer.Exit(1)
 
+def main():
+    """Main entry point for the CLI."""
+    try:
+        app()
+    except Exception as e:
+        logger.error(f"Command failed: {e}")
+        sys.exit(1)
+
 if __name__ == "__main__":
-    app()
+    main()

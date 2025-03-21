@@ -66,4 +66,45 @@ if (-not $isAdmin) {
     Write-Error "This script must be run as Administrator"
     exit 1
 }
+{% endmacro %}
+
+# Common PowerShell functions for integration scripts
+
+{% macro log_message(level, message) %}
+Write-Host "[$([datetime]::Now.ToString('yyyy-MM-dd HH:mm:ss'))] [{{ level }}] {{ message }}"
+{% endmacro %}
+
+{% macro handle_error(message) %}
+Write-Host "[$([datetime]::Now.ToString('yyyy-MM-dd HH:mm:ss'))] [ERROR] {{ message }}"
+exit 1
+{% endmacro %}
+
+{% macro check_command(cmd) %}
+if (-not (Get-Command {{ cmd }} -ErrorAction SilentlyContinue)) {
+    {{ handle_error('Required command not found: ' + cmd) }}
+}
+{% endmacro %}
+
+{% macro check_file(path) %}
+if (-not (Test-Path "{{ path }}" -PathType Leaf)) {
+    {{ handle_error('Required file not found: ' + path) }}
+}
+{% endmacro %}
+
+{% macro check_directory(path) %}
+if (-not (Test-Path "{{ path }}" -PathType Container)) {
+    {{ handle_error('Required directory not found: ' + path) }}
+}
+{% endmacro %}
+
+{% macro backup_file(path) %}
+if (Test-Path "{{ path }}" -PathType Leaf) {
+    Copy-Item "{{ path }}" "{{ path }}.bak.$([datetime]::Now.ToString('yyyyMMdd_HHmmss'))"
+}
+{% endmacro %}
+
+{% macro restore_file(path) %}
+if (Test-Path "{{ path }}.bak" -PathType Leaf) {
+    Move-Item "{{ path }}.bak" "{{ path }}" -Force
+}
 {% endmacro %} 
