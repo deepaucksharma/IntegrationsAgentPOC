@@ -289,7 +289,7 @@
   },
   "infra_agent_infrastructure-agent_install": {
     "failures": [],
-    "successes": 1,
+    "successes": 2,
     "improvements": []
   }
 }

@@ -46,3 +46,7 @@ workflow_history.db
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+# Generated files
+generated_scripts/
+*.generated.*
