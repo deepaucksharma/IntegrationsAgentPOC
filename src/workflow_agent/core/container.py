@@ -30,12 +30,12 @@ class ComponentRegistry:
     dependencies: Dict[str, set] = field(default_factory=dict)
 
 class DependencyContainer:
-    """Container for managing component dependencies and lifecycle."""
-    
-    def __init__(self, config: Dict[str, Any]):
+    """Manages workflow agent dependencies."""
+
+    def __init__(self, config: WorkflowConfiguration):
+        """Initialize the container."""
         self.config = config
-        self._components = {}
-        self._initialized = False
+        self.components = {}
         self.registry = ComponentRegistry()
         self._setup_dependencies()
 
@@ -57,7 +57,7 @@ class DependencyContainer:
         }
 
     async def initialize(self) -> None:
-        """Initialize all components in dependency order."""
+        """Initialize all components."""
         try:
             # Register core components
             self.register('platform_manager', PlatformManager())
@@ -93,7 +93,6 @@ class DependencyContainer:
             for component_name in self._get_initialization_order():
                 await self._initialize_component(component_name)
                 
-            self._initialized = True
             logger.info("Container initialization complete")
                 
         except Exception as e:
@@ -104,7 +103,7 @@ class DependencyContainer:
             )
 
     async def cleanup(self) -> None:
-        """Clean up all components in reverse dependency order."""
+        """Clean up all components."""
         cleanup_order = list(reversed(self._get_initialization_order()))
         for component_name in cleanup_order:
             component = self.registry.components.get(component_name)
@@ -115,22 +114,21 @@ class DependencyContainer:
                     logger.error(f"Error cleaning up component {component_name}: {e}")
 
         self.registry.components.clear()
-        self._initialized = False
         logger.info("Container cleanup complete")
 
     def register(self, name: str, component: Any) -> None:
-        """Register a component with the container."""
-        self._components[name] = component
+        """Register a component."""
+        self.components[name] = component
         logger.debug(f"Registered component: {name}")
         self.registry.components[name] = component
         self.registry.initialized[name] = False
 
     def get(self, name: str) -> Optional[Any]:
-        """Get a registered component."""
-        if not self._initialized:
+        """Get a component by name."""
+        if not self.components:
             raise InitializationError("Container not initialized")
             
-        component = self._components.get(name)
+        component = self.components.get(name)
         if not component:
             raise InitializationError(f"Component {name} not found in container")
             
@@ -177,21 +175,16 @@ class DependencyContainer:
             )
 
     def validate_initialization(self) -> None:
-        """Validate container initialization."""
-        if not self._initialized:
-            raise InitializationError("Container not initialized")
-            
-        # Check required components
+        """Validate that all required components are initialized."""
         required_components = [
-            'integration_manager',
-            'integration_registry',
-            'recovery_manager',
-            'script_generator',
-            'storage_manager',
-            'verification_manager',
-            'documentation_handler'
+            "integration_registry",
+            "integration_manager",
+            "recovery_manager",
+            "script_generator",
+            "storage_manager",
+            "verification_manager",
+            "documentation_handler"
         ]
-        
-        missing = [name for name in required_components if name not in self._components]
-        if missing:
-            raise InitializationError(f"Missing required components: {', '.join(missing)}") 
+        for name in required_components:
+            if name not in self.components:
+                raise ValueError(f"Required component {name} not registered") 

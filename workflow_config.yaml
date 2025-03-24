@@ -12,7 +12,7 @@ plugin_dirs:
 
 # LLM Configuration
 llm_provider: "gemini"
-gemini_api_key: ""
+gemini_api_key: "AIzaSyAyGoywP_4dr5fWFi8LjR6ZV6gyk7HuAME"
 
 # Execution Configuration
 use_recovery: true

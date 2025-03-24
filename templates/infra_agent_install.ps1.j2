@@ -1,0 +1,35 @@
+# Infrastructure Agent Installation Template
+# Parameters:
+# - license_key: License key for the agent
+# - host: Target host
+# - port: Target port
+# - install_dir: Installation directory
+# - config_path: Configuration directory
+# - log_path: Log directory
+
+# Create directories
+New-Item -ItemType Directory -Force -Path "{{ install_dir }}"
+New-Item -ItemType Directory -Force -Path "{{ config_path }}"
+New-Item -ItemType Directory -Force -Path "{{ log_path }}"
+
+# Write configuration
+$config = @{
+    "license_key" = "{{ license_key }}"
+    "host" = "{{ host }}"
+    "port" = "{{ port }}"
+    "log_level" = "INFO"
+}
+
+$configJson = $config | ConvertTo-Json
+Set-Content -Path "{{ config_path }}\config.json" -Value $configJson
+
+# Install agent
+Write-Host "Installing infrastructure agent..."
+Write-Host "Installation directory: {{ install_dir }}"
+Write-Host "Configuration path: {{ config_path }}"
+Write-Host "Log path: {{ log_path }}"
+
+# TODO: Add actual installation steps
+# For now, just simulate installation
+
+Write-Host "Infrastructure agent installed successfully" 

@@ -5,6 +5,7 @@ import os
 import platform
 import sys
 import json
+import pytest
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, List, Optional
@@ -26,6 +27,7 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
+@pytest.mark.asyncio
 async def test_installation_workflow(agent: WorkflowAgent) -> Dict[str, Any]:
     """Test installation workflow."""
     logger.info("Testing installation workflow...")
@@ -53,6 +55,7 @@ async def test_installation_workflow(agent: WorkflowAgent) -> Dict[str, Any]:
     logger.info("Installation workflow completed: %s", result.model_dump())
     return result.model_dump()
 
+@pytest.mark.asyncio
 async def test_verification_workflow(agent: WorkflowAgent) -> Dict[str, Any]:
     """Test verification workflow."""
     logger.info("Testing verification workflow...")
@@ -78,6 +81,7 @@ async def test_verification_workflow(agent: WorkflowAgent) -> Dict[str, Any]:
     logger.info("Verification workflow completed: %s", result.model_dump())
     return result.model_dump()
 
+@pytest.mark.asyncio
 async def test_custom_integration_workflow(agent: WorkflowAgent) -> Dict[str, Any]:
     """Test custom integration workflow."""
     logger.info("Testing custom integration workflow...")
@@ -100,6 +104,7 @@ async def test_custom_integration_workflow(agent: WorkflowAgent) -> Dict[str, An
     logger.info("Custom integration workflow completed: %s", result.model_dump())
     return result.model_dump()
 
+@pytest.mark.asyncio
 async def test_uninstallation_workflow(agent: WorkflowAgent) -> Dict[str, Any]:
     """Test uninstallation workflow."""
     logger.info("Testing uninstallation workflow...")
@@ -123,6 +128,7 @@ async def test_uninstallation_workflow(agent: WorkflowAgent) -> Dict[str, Any]:
     logger.info("Uninstallation workflow completed: %s", result.model_dump())
     return result.model_dump()
 
+@pytest.mark.asyncio
 async def test_error_handling_workflow(agent: WorkflowAgent) -> Dict[str, Any]:
     """Test error handling and recovery."""
     logger.info("Testing error handling and recovery...")

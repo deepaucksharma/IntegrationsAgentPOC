@@ -252,75 +252,46 @@ fi
                 file_path=f"C:\\Program Files\\New Relic\\newrelic-infra\\integrations.d\\{integration_name}-config.yml"
             ))
         
-        # Add service check if applicable
-        if "agent" in integration_type or "service" in integration_type:
-            service_name = f"newrelic-{integration_type}"
+        # Add service checks
+        if integration_type == "infra_agent":
+            service_name = "newrelic-infra" if system == "linux" else "New Relic Infrastructure"
             check_lines.append(templates["service_check"].substitute(service_name=service_name))
         
-        # Add process check
-        process_name = f"newrelic-{integration_type}"
-        check_lines.append(templates["process_check"].substitute(process_name=process_name))
-        
-        # Add common port checks
-        common_ports = self._get_common_ports(integration_type)
-        check_lines.extend([templates["port_check"].substitute(port=port) for port in common_ports])
+        # Add port checks
+        if "port" in state.parameters:
+            check_lines.append(templates["port_check"].substitute(port=state.parameters["port"]))
         
         return check_lines
 
-    def _get_common_ports(self, integration_type: str) -> List[int]:
-        """Gets common ports for an integration type."""
-        # Define common ports for different integration types
-        port_mappings = {
-            "mysql": [3306],
-            "postgresql": [5432],
-            "redis": [6379],
-            "mongodb": [27017],
-            "elasticsearch": [9200, 9300],
-            "nginx": [80, 443],
-            "apache": [80, 443],
-            "kafka": [9092],
-            "rabbitmq": [5672, 15672],
-            "default": [8080]
-        }
-        
-        # Return ports for the integration type or default ports
-        for key, ports in port_mappings.items():
-            if key in integration_type:
-                return ports
-        return port_mappings["default"]
-
-    def _generate_config_validation(self, system: str, config: Dict[str, str], state: Any) -> List[str]:
+    def _generate_config_validation(self, system: str, config: Dict[str, Any], state: Any) -> List[str]:
         """Generates configuration validation checks."""
         templates = self.verification_templates.get(system, self.verification_templates["linux"])
-        validate_lines = ["\n# Configuration validation"]
+        check_lines = ["\n# Configuration validation checks"]
         
-        # Files to check for configuration
-        config_files = []
-        if system == "linux":
-            config_files = [f"/etc/newrelic-infra/integrations.d/{state.target_name.lower()}-config.yml"]
-        elif system == "windows":
-            config_files = [f"C:\\Program Files\\New Relic\\newrelic-infra\\integrations.d\\{state.target_name.lower()}-config.yml"]
+        # Common configuration paths
+        config_paths = {
+            "linux": "/etc/newrelic-infra/integrations.d",
+            "windows": "C:\\Program Files\\New Relic\\newrelic-infra\\integrations.d"
+        }
         
-        # Check for required configuration options
-        for option, requirement in config.items():
-            if requirement == "required":
-                for file_path in config_files:
-                    validate_lines.append(templates["config_check"].substitute(
-                        search_string=option,
-                        file_path=file_path
-                    ))
+        # Check for required configuration values
+        for key, value in state.parameters.items():
+            if value and isinstance(value, str):
+                check_lines.append(templates["config_check"].substitute(
+                    search_string=value,
+                    file_path=f"{config_paths[system]}/{state.target_name}-config.yml"
+                ))
         
-        return validate_lines
+        return check_lines
 
     def _clean_verification_step(self, step: str) -> str:
-        """Cleans and formats a verification step command."""
-        # Remove common documentation artifacts
-        step = step.strip()
-        step = step.replace("```", "").replace("`", "")
-        step = step.replace("$ ", "").replace("# ", "")
+        """Cleans and validates a verification step command."""
+        # Remove common natural language prefixes
+        step = re.sub(r'^(?:run|execute|check|verify|test)\s+', '', step.strip(), flags=re.IGNORECASE)
         
-        # Remove explanatory text in parentheses
-        import re
-        step = re.sub(r'\([^)]*\)', '', step)
-        
+        # Basic security checks (you might want to add more)
+        if any(dangerous in step.lower() for dangerous in ['rm -rf', 'deltree', 'format']):
+            logger.warning(f"Skipping potentially dangerous command: {step}")
+            return ""
+            
         return step

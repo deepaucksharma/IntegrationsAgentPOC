@@ -13,50 +13,41 @@ from .base import IntegrationBase
 logger = logging.getLogger(__name__)
 
 class IntegrationRegistry:
-    """Registry for integration handlers with auto-discovery capability."""
+    """Registry for managing integration plugins."""
+    
+    _instance = None
     _integrations: Dict[str, Type[IntegrationBase]] = {}
-    _targets_map: Dict[str, List[str]] = {}
-    _categories: Dict[str, Set[str]] = {}
-    _initialized = False
+
+    def __new__(cls):
+        """Ensure singleton instance."""
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
 
     @classmethod
-    def register(cls, name: str, integration_class: Type[IntegrationBase]) -> None:
-        """Register an integration class with the registry."""
-        normalized_name = name.lower().replace("integration", "")
-        cls._integrations[normalized_name] = integration_class
-        
-        # Add to category map
-        category = integration_class.get_category()
-        if category not in cls._categories:
-            cls._categories[category] = set()
-        cls._categories[category].add(normalized_name)
-        
-        # Update targets map
-        for target in integration_class.get_supported_targets():
-            if target not in cls._targets_map:
-                cls._targets_map[target] = []
-            cls._targets_map[target].append(normalized_name)
-        
-        logger.debug(f"Registered integration: {normalized_name} in category {category}")
+    def register(cls, integration_class: Type[IntegrationBase]) -> None:
+        """Register an integration class."""
+        name = integration_class.__name__.lower()
+        if name in cls._integrations:
+            logger.warning(f"Integration {name} already registered. Overwriting.")
+        cls._integrations[name] = integration_class
+        logger.info(f"Registered integration: {name}")
 
     @classmethod
     def get_integration(cls, name: str) -> Optional[Type[IntegrationBase]]:
         """Get an integration class by name."""
-        if not cls._initialized:
-            cls._discover_integrations()
-        
-        # Try direct lookup
-        normalized = name.lower().replace("integration", "")
-        if normalized in cls._integrations:
-            return cls._integrations[normalized]
-        
-        # Try flexible matching - handle underscores, hyphens
-        flexible_name = normalized.replace("_", "").replace("-", "")
-        for key, value in cls._integrations.items():
-            if key.replace("_", "").replace("-", "") == flexible_name:
-                return value
-        
-        return None
+        return cls._integrations.get(name.lower())
+
+    @classmethod
+    def list_integrations(cls) -> Dict[str, Type[IntegrationBase]]:
+        """List all registered integrations."""
+        return cls._integrations.copy()
+
+    @classmethod
+    def clear(cls) -> None:
+        """Clear all registered integrations."""
+        cls._integrations.clear()
+        logger.info("Cleared all registered integrations")
 
     @classmethod
     def get_integrations_for_target(cls, target: str) -> List[str]:
@@ -137,7 +128,7 @@ class IntegrationRegistry:
                             if (inspect.isclass(obj) and 
                                 issubclass(obj, IntegrationBase) and 
                                 obj is not IntegrationBase):
-                                cls.register(name, obj)
+                                cls.register(obj)
                                 
                     except Exception as e:
                         logger.warning(f"Failed to load integration module {module_name}: {e}")

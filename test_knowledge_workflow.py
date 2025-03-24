@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime
+import pytest
 
 from workflow_agent.core.state import WorkflowState
 from workflow_agent.core.message_bus import MessageBus
@@ -150,6 +151,7 @@ async def create_knowledge_state(
         template_data={}
     )
 
+@pytest.mark.asyncio
 async def test_knowledge_retrieval(
     knowledge_base: KnowledgeBase, 
     doc_parser: DocumentationParser,
@@ -195,6 +197,7 @@ async def test_knowledge_retrieval(
         logger.error(f"Error retrieving knowledge: {e}", exc_info=True)
         raise
 
+@pytest.mark.asyncio
 async def test_knowledge_enhancement(
     knowledge_manager: DynamicIntegrationKnowledge, 
     state: WorkflowState, 
@@ -239,6 +242,7 @@ async def test_knowledge_enhancement(
         logger.error(f"Error enhancing knowledge: {e}", exc_info=True)
         raise
 
+@pytest.mark.asyncio
 async def test_strategy_selection(
     strategy_agent: InstallationStrategyAgent,
     state: WorkflowState

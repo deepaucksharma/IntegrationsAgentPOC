@@ -6,6 +6,7 @@ import platform
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime
+import pytest
 
 from workflow_agent.main import WorkflowAgent
 from workflow_agent.core.state import WorkflowState
@@ -14,6 +15,9 @@ from workflow_agent.core.message_bus import MessageBus
 from workflow_agent.verification.verifier import Verifier
 from workflow_agent.verification.dynamic import DynamicVerificationBuilder
 from workflow_agent.utils.system import get_system_context
+from workflow_agent.verification.script_generator import VerificationScriptGenerator
+from workflow_agent.verification.runner import VerificationRunner
+from workflow_agent.verification.direct import DirectVerifier
 
 # Configure logging
 logging.basicConfig(
@@ -227,11 +231,15 @@ def get_verification_test_cases() -> List[Dict[str, Any]]:
         }
     ]
 
-async def test_verification_script_generation(verifier: DynamicVerificationBuilder, state: WorkflowState) -> Optional[Path]:
+@pytest.mark.asyncio
+async def test_verification_script_generation(
+    script_generator: VerificationScriptGenerator,
+    state: WorkflowState
+) -> Tuple[WorkflowState, Path]:
     """Test verification script generation."""
     try:
         logger.info(f"Testing verification script generation for {state.target_name}")
-        script = await verifier.build_verification_script(state)
+        script = await script_generator.build_verification_script(state)
         
         if script:
             # Save verification script
@@ -247,13 +255,18 @@ async def test_verification_script_generation(verifier: DynamicVerificationBuild
                 f.write(script)
             
             logger.info(f"Generated verification script saved to: {script_path}")
-            return script_path
-        return None
+            return state, script_path
+        return state, None
     except Exception as e:
         logger.error(f"Error generating verification script: {e}", exc_info=True)
-        return None
+        return state, None
 
-async def test_verification_execution(agent: WorkflowAgent, state: WorkflowState, script_path: Path) -> Dict[str, Any]:
+@pytest.mark.asyncio
+async def test_verification_execution(
+    verification_runner: VerificationRunner,
+    state: WorkflowState,
+    script_path: Path
+) -> Dict[str, Any]:
     """Test verification script execution."""
     try:
         logger.info(f"Testing verification execution for {state.target_name}")
@@ -264,7 +277,7 @@ async def test_verification_execution(agent: WorkflowAgent, state: WorkflowState
         state = state.evolve(script=script)
         
         # Run verification
-        result = await agent.run_workflow(state)
+        result = await verification_runner.run_verification(state)
         logger.info(f"Verification execution completed with result: {result}")
         
         return {
@@ -284,8 +297,12 @@ async def test_verification_execution(agent: WorkflowAgent, state: WorkflowState
             "script_path": str(script_path) if script_path else None
         }
 
-async def test_direct_verification(verifier: Verifier, state: WorkflowState) -> Dict[str, Any]:
-    """Test direct verification without script generation."""
+@pytest.mark.asyncio
+async def test_direct_verification(
+    direct_verifier: DirectVerifier,
+    state: WorkflowState
+) -> Dict[str, Any]:
+    """Test direct verification without script."""
     try:
         logger.info(f"Testing direct verification for {state.target_name}")
         
@@ -302,7 +319,7 @@ async def test_direct_verification(verifier: Verifier, state: WorkflowState) -> 
         state = state.evolve(output=output)
         
         # Run verification
-        result = await verifier.verify_result(state)
+        result = await direct_verifier.verify_result(state)
         logger.info(f"Direct verification completed with result: {result}")
         
         return {
@@ -327,6 +344,9 @@ async def run_verification_workflow(test_case: Dict[str, Any], agent: WorkflowAg
     # Create components
     verifier_builder = DynamicVerificationBuilder()
     verifier = Verifier()
+    script_generator = VerificationScriptGenerator()
+    verification_runner = VerificationRunner()
+    direct_verifier = DirectVerifier()
     
     # Create state
     state = create_verification_state(
@@ -347,19 +367,19 @@ async def run_verification_workflow(test_case: Dict[str, Any], agent: WorkflowAg
     }
     
     # Test script generation
-    script_path = await test_verification_script_generation(verifier_builder, state)
+    state, script_path = await test_verification_script_generation(script_generator, state)
     if script_path:
         results["script_generation"] = True
         results["script_path"] = str(script_path)
         
         # Test script execution
-        execution_result = await test_verification_execution(agent, state, script_path)
+        execution_result = await test_verification_execution(verification_runner, state, script_path)
         results["script_execution"] = execution_result["success"]
         if not execution_result["success"]:
             results["execution_error"] = execution_result.get("error")
     
     # Test direct verification
-    direct_result = await test_direct_verification(verifier, state)
+    direct_result = await test_direct_verification(direct_verifier, state)
     results["direct_verification"] = direct_result["success"]
     if not direct_result["success"]:
         results["direct_error"] = direct_result.get("error")

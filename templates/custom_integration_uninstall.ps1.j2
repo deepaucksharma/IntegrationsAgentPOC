@@ -1,0 +1,14 @@
+# Custom Integration Uninstallation Template
+# Parameters:
+# - config_path: Configuration directory
+
+# TODO: Add actual uninstallation steps
+# For now, just simulate uninstallation
+
+# Remove config directory
+if (Test-Path "{{ config_path }}") {
+    Remove-Item -Path "{{ config_path }}" -Recurse -Force
+    Write-Host "Removed configuration directory: {{ config_path }}"
+}
+
+Write-Host "Custom integration uninstalled successfully" 

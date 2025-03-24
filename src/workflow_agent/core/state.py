@@ -1,7 +1,7 @@
 """
 Core state definitions for workflow execution using Pydantic.
 """
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 from typing import Any, Dict, List, Optional, Set
 from copy import deepcopy
 from datetime import datetime
@@ -82,7 +82,7 @@ class WorkflowState(BaseModel):
     def evolve(self, **changes) -> 'WorkflowState':
         """Create a new state with the specified changes."""
         # Create a copy of the current state's data
-        data = self.dict(exclude={'modified_fields', 'state_id', 'parent_state_id', 'created_at'})
+        data = self.model_dump(exclude={'modified_fields', 'state_id', 'parent_state_id', 'created_at'})
         
         # Update with new changes
         data.update(changes)
@@ -125,12 +125,14 @@ class WorkflowState(BaseModel):
         """Set the script in the state."""
         return self.evolve(script=script)
 
-    @validator('changes', 'warnings', 'messages', pre=True)
+    @field_validator('changes', 'warnings', 'messages', mode='before')
+    @classmethod
     def ensure_immutable_lists(cls, v):
         """Ensure lists are immutable."""
         return tuple(v)
 
-    @validator('parameters', 'template_data', 'system_context', pre=True)
+    @field_validator('parameters', 'template_data', 'system_context', mode='before')
+    @classmethod
     def ensure_immutable_dicts(cls, v):
         """Ensure dictionaries are immutable by creating deep copies."""
         return deepcopy(v)

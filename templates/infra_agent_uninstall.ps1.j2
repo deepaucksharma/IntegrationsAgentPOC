@@ -1,0 +1,24 @@
+# Infrastructure Agent Uninstallation Template
+# Parameters:
+# - install_dir: Installation directory
+# - config_path: Configuration directory
+# - log_path: Log directory
+
+# TODO: Add actual uninstallation steps
+# For now, just simulate uninstallation
+
+# Remove directories
+$directories = @(
+    "{{ install_dir }}",
+    "{{ config_path }}",
+    "{{ log_path }}"
+)
+
+foreach ($dir in $directories) {
+    if (Test-Path $dir) {
+        Remove-Item -Path $dir -Recurse -Force
+        Write-Host "Removed directory: $dir"
+    }
+}
+
+Write-Host "Infrastructure agent uninstalled successfully" 

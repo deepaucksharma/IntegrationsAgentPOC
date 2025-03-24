@@ -10,37 +10,56 @@ from typing import Dict, Any, Optional, List
 logger = logging.getLogger(__name__)
 
 def get_system_context() -> Dict[str, Any]:
-    """
-    Gather basic system context data for environment-based script customization.
-    """
-    return {
-        "platform": {
-            "system": platform.system(),
-            "release": platform.release(),
-            "version": platform.version(),
-            "architecture": platform.machine(),
-            "processor": platform.processor(),
-            "hostname": socket.gethostname()
-        },
-        "docker_available": shutil.which("docker") is not None,
-        "package_managers": {
-            "apt": shutil.which("apt-get") is not None,
-            "yum": shutil.which("yum") is not None,
-            "dnf": shutil.which("dnf") is not None,
-            "pacman": shutil.which("pacman") is not None,
-            "brew": shutil.which("brew") is not None
-        },
-        "user": {
-            "username": os.getenv("USER", os.getenv("USERNAME", "unknown")),
-            "uid": os.getuid() if hasattr(os, "getuid") else -1,
-            "home": os.path.expanduser("~")
-        },
-        "hardware": {
-            "cpu_count": psutil.cpu_count(),
-            "memory_total": psutil.virtual_memory().total,
-            "memory_available": psutil.virtual_memory().available
+    """Get system context information."""
+    try:
+        system = platform.system().lower()
+        context = {
+            "platform": {
+                "system": system,
+                "version": platform.version(),
+                "machine": platform.machine(),
+                "processor": platform.processor()
+            },
+            "environment": {
+                "python_version": platform.python_version(),
+                "path": os.environ.get("PATH", ""),
+                "home": os.environ.get("HOME", os.environ.get("USERPROFILE", ""))
+            }
         }
-    }
+
+        # Add system-specific information
+        if system == "windows":
+            context["platform"].update({
+                "distribution": "windows",
+                "release": platform.release(),
+                "edition": platform.win32_edition() if hasattr(platform, "win32_edition") else ""
+            })
+        elif system == "linux":
+            # Try to get Linux distribution info
+            try:
+                import distro
+                context["platform"].update({
+                    "distribution": distro.id(),
+                    "distribution_version": distro.version(),
+                    "codename": distro.codename()
+                })
+            except ImportError:
+                # Fallback to basic Linux info
+                context["platform"].update({
+                    "distribution": "unknown",
+                    "distribution_version": "",
+                    "codename": ""
+                })
+
+        return context
+    except Exception as e:
+        # Return basic info on error
+        return {
+            "platform": {
+                "system": platform.system().lower(),
+                "version": platform.version()
+            }
+        }
 
 async def execute_command(command: List[str], timeout: Optional[int] = None, capture_output: bool = True) -> Dict[str, Any]:
     """

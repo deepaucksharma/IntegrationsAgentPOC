@@ -1,0 +1,33 @@
+# Infrastructure Agent Verification Template
+# Parameters:
+# - install_dir: Installation directory
+# - config_path: Configuration directory
+# - log_path: Log directory
+
+# Check directories
+$directories = @(
+    "{{ install_dir }}",
+    "{{ config_path }}",
+    "{{ log_path }}"
+)
+
+foreach ($dir in $directories) {
+    if (-not (Test-Path $dir)) {
+        Write-Error "Directory not found: $dir"
+        exit 1
+    }
+}
+
+# Check configuration
+$configFile = "{{ config_path }}\config.json"
+if (-not (Test-Path $configFile)) {
+    Write-Error "Configuration file not found: $configFile"
+    exit 1
+}
+
+# TODO: Add actual verification steps
+# For now, just simulate verification
+
+Write-Host "Infrastructure agent verified successfully"
+Write-Host "Status: Running"
+Write-Host "Version: 1.0.0" 

@@ -1,0 +1,16 @@
+# Custom Integration Installation Template
+# Parameters:
+# - integration_url: URL to download the integration from
+# - config_path: Configuration directory
+
+# Create config directory
+New-Item -ItemType Directory -Force -Path "{{ config_path }}"
+
+# TODO: Add actual download and installation steps
+# For now, just simulate downloading from URL
+
+Write-Host "Downloading integration from {{ integration_url }}..."
+Write-Host "Configuration path: {{ config_path }}"
+
+# Simulate successful installation
+Write-Host "Custom integration installed successfully" 

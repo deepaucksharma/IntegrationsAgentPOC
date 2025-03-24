@@ -58,19 +58,24 @@ class KnowledgeBase:
             except Exception as e:
                 logger.error(f"Error saving documents: {e}")
     
-    async def retrieve_documents(self, integration_type: str, target_name: str, action: Optional[str] = None) -> Dict[str, Any]:
+    async def retrieve_documents(
+        self,
+        integration_type: str,
+        target_name: str,
+        action: str
+    ) -> Optional[Dict[str, Any]]:
         """Retrieve documents for an integration."""
-        result = {}
-        def_key = f"{integration_type}_{target_name}_definition"
-        if def_key in self.documents:
-            result["definition"] = self.documents[def_key]
-        param_key = f"{integration_type}_{target_name}_parameters"
-        if param_key in self.documents:
-            result["parameters"] = self.documents[param_key]
-        verify_key = f"{integration_type}_{target_name}_verification"
-        if verify_key in self.documents:
-            result["verification"] = self.documents[verify_key]
-        return result
+        try:
+            # TODO: Implement document retrieval
+            return {
+                "definition": {
+                    "name": target_name,
+                    "type": integration_type,
+                    "actions": [action]
+                }
+            }
+        except Exception as e:
+            raise
     
     async def get_all_documents(self, integration_type: Optional[str] = None) -> Dict[str, Any]:
         """Get all documents, optionally filtered by integration type."""

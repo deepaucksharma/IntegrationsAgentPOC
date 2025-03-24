@@ -8,7 +8,7 @@ import json
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union, Set
-from pydantic import BaseModel, Field, validator, root_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from ..error.exceptions import ConfigurationError
 
 logger = logging.getLogger(__name__)
@@ -26,10 +26,32 @@ dangerous_patterns = [
 ]
 
 class WorkflowConfiguration(BaseModel):
-    """Configuration for workflow agent with enhanced validation."""
+    """Configuration for workflow execution."""
+    
+    # General settings
+    debug: bool = False
+    log_level: str = "INFO"
+    log_file: Optional[str] = None
+    
+    # Script generation settings
+    script_generator: str = "basic"  # basic, llm, enhanced
+    template_dir: Optional[str] = None
+    
+    # LLM settings
+    llm_provider: str = "openai"  # openai, gemini
+    openai_api_key: Optional[str] = None
+    gemini_api_key: Optional[str] = None
+    
+    # Execution settings
+    max_retries: int = 3
+    retry_delay: float = 1.0
+    timeout: float = 300.0
+    
+    # Storage settings
+    storage_dir: str = "generated_scripts"
+    knowledge_dir: str = "generated_knowledge"
     
     user_id: str = Field(default="test_user", description="User identifier")
-    template_dir: Path = Field(default="./src/workflow_agent/integrations/common_templates", description="Main template directory")
     custom_template_dir: Optional[Path] = Field(default=None, description="Custom template directory")
     use_isolation: bool = Field(default=False, description="Whether to use isolation")
     isolation_method: str = Field(default="direct", description="Isolation method to use")
@@ -42,13 +64,9 @@ class WorkflowConfiguration(BaseModel):
     plugin_dirs: List[Path] = Field(default_factory=lambda: [Path("./plugins")], description="Plugin directories")
     max_concurrent_tasks: int = Field(default=5, description="Maximum concurrent tasks", ge=1, le=100)
     least_privilege_execution: bool = Field(default=True, description="Use least privilege execution")
-    log_level: str = Field(default="DEBUG", description="Logging level")
     docs_cache_dir: Optional[Path] = Field(default="./cache/docs", description="Documentation cache directory")
     docs_cache_ttl: int = Field(default=86400, description="Documentation cache TTL in seconds", ge=1)
     use_recovery: bool = Field(default=True, description="Use recovery")
-    llm_provider: str = Field(default="openai", description="LLM provider to use (openai or gemini)")
-    openai_api_key: Optional[str] = Field(default=None, description="OpenAI API key")
-    gemini_api_key: Optional[str] = Field(default=None, description="Google Gemini API key")
     error_handling: Dict[str, Any] = Field(
         default_factory=lambda: {
             "continue_on_error": False,
@@ -58,7 +76,8 @@ class WorkflowConfiguration(BaseModel):
         description="Error handling configuration"
     )
 
-    @validator("isolation_method")
+    @field_validator("isolation_method")
+    @classmethod
     def validate_isolation_method(cls, value: str) -> str:
         """Validate isolation method."""
         valid_methods = {"docker", "chroot", "venv", "direct", "none"}
@@ -66,7 +85,8 @@ class WorkflowConfiguration(BaseModel):
             raise ValueError(f"Invalid isolation method '{value}'. Must be one of: {valid_methods}")
         return value.lower()
 
-    @validator("log_level")
+    @field_validator("log_level")
+    @classmethod
     def validate_log_level(cls, value: str) -> str:
         """Validate log level."""
         valid_levels = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
@@ -75,7 +95,8 @@ class WorkflowConfiguration(BaseModel):
             raise ValueError(f"Invalid log level '{value}'. Must be one of: {valid_levels}")
         return value_upper
 
-    @validator("template_dir", "custom_template_dir", "docs_cache_dir")
+    @field_validator("template_dir", "custom_template_dir", "docs_cache_dir")
+    @classmethod
     def convert_single_path(cls, value: Any) -> Optional[Path]:
         """Convert single path strings to Path objects."""
         if value is None:
@@ -86,16 +107,16 @@ class WorkflowConfiguration(BaseModel):
             return value.resolve()
         raise ValueError(f"Invalid path value: {value}")
 
-    @validator("plugin_dirs", each_item=True)
-    def convert_path_list(cls, value: Any) -> Path:
+    @field_validator("plugin_dirs", mode="before")
+    @classmethod
+    def convert_path_list(cls, value: Any) -> List[Path]:
         """Convert path strings in lists to Path objects."""
-        if isinstance(value, str):
-            return Path(value).resolve()
-        if isinstance(value, Path):
-            return value.resolve()
-        raise ValueError(f"Invalid path value: {value}")
+        if not isinstance(value, list):
+            raise ValueError("plugin_dirs must be a list")
+        return [Path(v).resolve() if isinstance(v, (str, Path)) else v for v in value]
 
-    @validator("llm_provider")
+    @field_validator("llm_provider")
+    @classmethod
     def validate_llm_provider(cls, value: str) -> str:
         """Validate LLM provider."""
         valid_providers = {"openai", "gemini"}
@@ -103,7 +124,8 @@ class WorkflowConfiguration(BaseModel):
             raise ValueError(f"Invalid LLM provider '{value}'. Must be one of: {valid_providers}")
         return value.lower()
 
-    @root_validator(pre=True)
+    @model_validator(mode="before")
+    @classmethod
     def resolve_workspace_paths(cls, values: Dict[str, Any]) -> Dict[str, Any]:
         """Resolve ${WORKSPACE_ROOT} in paths."""
         workspace_root = os.environ.get("WORKSPACE_ROOT", os.getcwd())
@@ -125,7 +147,8 @@ class WorkflowConfiguration(BaseModel):
                 
         return processed
     
-    @root_validator(pre=True)
+    @model_validator(mode="before")
+    @classmethod
     def setup_api_keys(cls, values: Dict[str, Any]) -> Dict[str, Any]:
         """Set up API keys from environment if not provided."""
         # Set up OpenAI API key
@@ -144,22 +167,15 @@ class WorkflowConfiguration(BaseModel):
     
     class Config:
         """Pydantic configuration."""
-        extra = "forbid"  # Disallow extra fields
+        extra = "allow"
         validate_assignment = True  # Validate when attributes are assigned
         arbitrary_types_allowed = True  # Allow arbitrary types (like Path)
 
-def ensure_workflow_config(config: Optional[Dict[str, Any]] = None) -> WorkflowConfiguration:
+def ensure_workflow_config(config: Dict[str, Any]) -> WorkflowConfiguration:
     """Ensure a valid workflow configuration."""
-    if config is None:
-        config = {}
-    
-    # Convert dict to WorkflowConfiguration if needed
-    if isinstance(config, dict):
-        return WorkflowConfiguration(**config)
-    elif isinstance(config, WorkflowConfiguration):
+    if isinstance(config, WorkflowConfiguration):
         return config
-    else:
-        raise ValueError(f"Invalid config type: {type(config)}")
+    return WorkflowConfiguration(**config)
 
 def merge_configs(base: WorkflowConfiguration, override: Dict[str, Any]) -> WorkflowConfiguration:
     """Merge two configurations."""

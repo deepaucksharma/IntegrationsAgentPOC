@@ -8,6 +8,7 @@ import yaml
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
+import pytest
 
 from workflow_agent.main import WorkflowAgent
 from workflow_agent.core.state import WorkflowState
@@ -18,6 +19,9 @@ from workflow_agent.scripting.llm_generator import LLMScriptGenerator
 from workflow_agent.scripting.enhanced_generator import EnhancedScriptGenerator, create_script_generator
 from workflow_agent.utils.system import get_system_context
 from workflow_agent.config.configuration import WorkflowConfiguration
+from workflow_agent.llm.template_engine import TemplateEngine
+from workflow_agent.llm.enhancer import ScriptEnhancer
+from workflow_agent.execution.runner import ScriptRunner
 
 # Configure logging
 logging.basicConfig(
@@ -250,17 +254,18 @@ def create_test_state(
         template_data=test_case["template_data"]
     )
 
+@pytest.mark.asyncio
 async def test_script_generation_with_template(
-    generator: ScriptGenerator, 
+    template_engine: TemplateEngine,
     state: WorkflowState
-) -> Dict[str, Any]:
-    """Test script generation using template-based generator."""
+) -> Tuple[WorkflowState, Path]:
+    """Test script generation using templates."""
     try:
         logger.info(f"Testing template-based script generation for {state.target_name}")
         
         # Generate script
         start_time = datetime.now()
-        gen_result = await generator.generate_script(state)
+        gen_result = await template_engine.generate_script(state)
         duration = (datetime.now() - start_time).total_seconds()
         
         result = {
@@ -301,17 +306,18 @@ async def test_script_generation_with_template(
             "error": str(e)
         }
 
+@pytest.mark.asyncio
 async def test_script_generation_with_llm(
-    generator: LLMScriptGenerator, 
+    script_generator: ScriptGenerator,
     state: WorkflowState
-) -> Dict[str, Any]:
-    """Test script generation using LLM-based generator."""
+) -> Tuple[WorkflowState, Path]:
+    """Test script generation using LLM."""
     try:
         logger.info(f"Testing LLM-based script generation for {state.target_name}")
         
         # Generate script
         start_time = datetime.now()
-        gen_result = await generator.generate_script(state)
+        gen_result = await script_generator.generate_script(state)
         duration = (datetime.now() - start_time).total_seconds()
         
         result = {
@@ -352,17 +358,19 @@ async def test_script_generation_with_llm(
             "error": str(e)
         }
 
+@pytest.mark.asyncio
 async def test_script_generation_with_enhanced(
-    generator: EnhancedScriptGenerator, 
-    state: WorkflowState
-) -> Dict[str, Any]:
-    """Test script generation using enhanced generator with fallback."""
+    script_enhancer: ScriptEnhancer,
+    state: WorkflowState,
+    script_path: Path
+) -> Tuple[WorkflowState, Path]:
+    """Test script enhancement."""
     try:
         logger.info(f"Testing enhanced script generation for {state.target_name}")
         
         # Generate script
         start_time = datetime.now()
-        gen_result = await generator.generate_script(state, {})
+        gen_result = await script_enhancer.enhance_script(state, script_path)
         duration = (datetime.now() - start_time).total_seconds()
         
         result = {
@@ -403,21 +411,22 @@ async def test_script_generation_with_enhanced(
             "error": str(e)
         }
 
+@pytest.mark.asyncio
 async def test_script_execution(
-    agent: WorkflowAgent,
+    script_runner: ScriptRunner,
     state: WorkflowState,
-    script: str
+    script_path: Path
 ) -> Dict[str, Any]:
-    """Test executing a generated script."""
+    """Test script execution."""
     try:
         logger.info(f"Testing script execution for {state.target_name}")
         
         # Apply script to state
-        state_with_script = state.evolve(script=script)
+        state_with_script = state.evolve(script=script_path.read_text())
         
         # Run workflow
         start_time = datetime.now()
-        result = await agent.run_workflow(state_with_script)
+        result = await script_runner.run_script(state_with_script)
         duration = (datetime.now() - start_time).total_seconds()
         
         return {
@@ -468,19 +477,14 @@ async def run_llm_workflow_test(
     results["generation_methods"]["llm"] = llm_result
     
     # Test enhanced generation
-    enhanced_result = await test_script_generation_with_enhanced(enhanced_generator, state)
+    enhanced_result = await test_script_generation_with_enhanced(enhanced_generator, state, Path(template_result["script_path"]))
     results["generation_methods"]["enhanced"] = enhanced_result
     
     # Test execution of successfully generated scripts
     for method_name, method_result in results["generation_methods"].items():
         if method_result.get("success") and "script_path" in method_result:
-            # Load script
-            script_path = method_result["script_path"]
-            with open(script_path, "r") as f:
-                script = f.read()
-            
             # Execute script
-            execution_result = await test_script_execution(agent, state, script)
+            execution_result = await test_script_execution(agent, state, Path(method_result["script_path"]))
             results["script_execution"][method_name] = execution_result
     
     return results

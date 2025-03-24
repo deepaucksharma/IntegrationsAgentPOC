@@ -15,6 +15,7 @@ from pydantic import ValidationError
 
 from .core.state import WorkflowState
 from .core.container import DependencyContainer
+from .verification.dynamic import DynamicVerificationBuilder
 from .config import (
     WorkflowConfiguration,
     ensure_workflow_config,

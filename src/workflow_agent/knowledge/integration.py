@@ -2,47 +2,37 @@
 from typing import Dict, Any, List
 import logging
 from ..documentation.parser import DocumentationParser
+from workflow_agent.core.state import WorkflowState
 
 logger = logging.getLogger(__name__)
 
-class DynamicIntegrationKnowledge:
-    """Enhances workflow state with documentation-based knowledge."""
+class KnowledgeBase:
+    """Base class for managing knowledge."""
     
-    def __init__(self, doc_parser: DocumentationParser = None):
-        """Initialize the knowledge manager."""
-        self.parser = doc_parser or DocumentationParser()
+    def __init__(self):
+        pass
 
-    async def enhance_workflow_state(self, state: Any) -> Any:
-        """Updates the workflow state with documentation data."""
+    async def retrieve_documents(self, integration_type: str, target_name: str, action: str) -> Dict[str, Any]:
+        """Retrieve documents for a given integration and action."""
         try:
-            logger.info(f"Enhancing workflow state for integration: {state.integration_type}")
-            docs = await self.parser.fetch_integration_docs(state.integration_type)
-            
-            # Get platform information from system context (with defensive check)
-            platform = self._get_platform_info(state.system_context or {})
-            
-            # Filter and enhance the documentation data
-            platform_specific_docs = self._filter_for_platform(docs, platform)
-            
-            # Get installation methods
-            installation_methods = self._get_installation_methods(docs, platform)
-            
-            # Update the state with documentation and installation data
-            if not hasattr(state, 'template_data') or state.template_data is None:
-                state.template_data = {}
-                
-            state.template_data.update({
-                "docs": docs,
-                "platform_specific": platform_specific_docs,
-                "platform_info": platform,
-                "installation_methods": installation_methods
-            })
-            
-            logger.info("Successfully enhanced workflow state with documentation data")
-            return state
-            
+            # Placeholder for actual retrieval logic
+            return {
+                "definition": f"Definition for {integration_type}/{target_name}/{action}",
+                "details": {}
+            }
         except Exception as e:
-            logger.error(f"Failed to enhance workflow state: {e}")
+            logger.error(f"Failed to retrieve documents: {e}")
+            return {}
+
+class DynamicIntegrationKnowledge:
+    """Manages dynamic integration knowledge."""
+
+    async def enhance_workflow_state(self, state: WorkflowState) -> WorkflowState:
+        """Enhance workflow state with integration knowledge."""
+        try:
+            # TODO: Implement knowledge enhancement
+            return state
+        except Exception as e:
             raise
 
     def _get_platform_info(self, system_context: Dict[str, Any]) -> Dict[str, Any]:
