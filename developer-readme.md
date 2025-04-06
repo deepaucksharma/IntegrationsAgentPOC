@@ -1,14 +1,15 @@
 # Developer Setup & Troubleshooting
 
-This guide provides instructions for setting up a development environment, common issues, and troubleshooting tips for the Workflow Agent framework.
+This guide provides instructions for setting up a development environment, common issues, and troubleshooting tips for the enhanced Workflow Agent framework with improved security, recovery, and reliability features.
 
 ## Navigation
 
--   [Overview](overview-readme.md)
+-   [Overview](README.md)
 -   [Architecture Overview](architecture-readme.md)
 -   [LLM & Agent System](llm-agents-readme.md)
 -   [Component Hierarchy](component-hierarchy-readme.md)
 -   [Data Flow](data-flow-readme.md)
+-   [Recent Fixes & Improvements](FIXED.md)
 
 ## Development Environment Setup
 
@@ -25,6 +26,10 @@ Before setting up the development environment, ensure you have:
 
 -   **Docker** (optional, for isolated execution testing)
     -   Follow \[Docker installation instructions](https://docs.docker.com/get-docker/) for your OS
+
+-   **Static Analysis Tools** (recommended for enhanced security features)
+    -   shellcheck: For shell script validation
+    -   pylint: For Python script validation
 
 -   **Git** for version control
 
@@ -81,6 +86,16 @@ source venv/bin/activate
 ```bash
 # Install in development mode with all extras
 pip install -e ".[dev,doc,llm]"
+
+# For enhanced security features, install static analysis tools
+# Windows (using choco)
+choco install shellcheck
+
+# macOS
+brew install shellcheck
+
+# Linux
+apt-get install shellcheck
 ```
 
 #### 4. Configure Development Environment
@@ -105,7 +120,7 @@ cp custom_config_no_docker.yaml workflow_config.yaml
 bash dev_bootstrap.sh
 ```
 
-## Project Structure for Development
+## Enhanced Project Structure for Development
 
 ```
 workflow-agent/                   # Project root
@@ -113,8 +128,16 @@ workflow-agent/                   # Project root
 ├── src/                          # Source code
 │   └── workflow_agent/           # Main package
 │       ├── __init__.py           # Package initialization
-│       ├── main.py               # Entry point
-│       └── ... (component dirs)  # Module subdirectories
+│       ├── main.py               # Enhanced main entry point
+│       ├── core/                 # Core components
+│       │   ├── state.py          # Enhanced state management
+│       │   ├── message_bus.py    # Message communication
+│       │   └── container.py      # Dependency injection
+│       ├── config/               # Enhanced configuration
+│       ├── scripting/            # Enhanced script generation and validation
+│       ├── execution/            # Enhanced script execution
+│       ├── recovery/             # Enhanced recovery system
+│       └── verification/         # Enhanced verification system
 │
 ├── tests/                        # Test suite
 │   ├── unit/                     # Unit tests
@@ -189,6 +212,95 @@ source venv/bin/activate  # macOS/Linux
 pip install -e .
 ```
 
+### Enhanced Security Features Issues
+
+#### Static Analysis Tools Not Found
+
+**Symptom:**
+
+```
+Warning: Enhanced security validation disabled - shellcheck not found
+```
+
+**Solution:**
+
+```bash
+# Install shellcheck for shell script validation
+# Windows (using choco)
+choco install shellcheck
+
+# macOS
+brew install shellcheck
+
+# Linux
+apt-get install shellcheck
+
+# Configure the path in workflow_config.yaml
+security:
+  static_analysis:
+    shellcheck_path: "/path/to/shellcheck"
+```
+
+#### Script Validation Failures
+
+**Symptom:**
+
+```
+SecurityError: Script failed security validation: [Dangerous pattern detected: rm -rf /]
+```
+
+**Solution:**
+
+-   Review the script for security issues
+-   Modify the script to use safer alternatives
+-   If you're sure the script is safe, you can disable least privilege execution in the config:
+
+```yaml
+# In workflow_config.yaml
+configurable:
+  least_privilege_execution: false  # USE WITH CAUTION
+```
+
+### Enhanced Recovery Features Issues
+
+#### Rollback Failures
+
+**Symptom:**
+
+```
+Error: Rollback failed: Unable to revert change [file_created]
+```
+
+**Solution:**
+
+-   Check the rolled-back path for permissions issues
+-   Review the recovery log for specific errors
+-   Try using a different recovery strategy:
+
+```yaml
+# In workflow_config.yaml
+recovery:
+  strategy: "individual_actions"  # Options: full_rollback, staged_rollback, individual_actions
+```
+
+#### Change Tracking Issues
+
+**Symptom:**
+
+```
+Warning: No changes detected during execution
+```
+
+**Solution:**
+
+-   Ensure your scripts use the proper change tracking format
+-   Add explicit change markers to your scripts:
+
+```bash
+# For shell scripts
+echo "CHANGE_JSON_BEGIN {\"type\":\"file_created\",\"target\":\"/path/to/file\",\"revertible\":true} CHANGE_JSON_END"
+```
+
 ### Running Issues
 
 #### Template Directory Not Found
@@ -252,7 +364,7 @@ configurable:
   least_privilege_execution: true
 ```
 
-## Debugging Techniques
+## Enhanced Debugging Techniques
 
 ### 1. Enable Debug Logging
 
@@ -284,7 +396,25 @@ for row in cursor.fetchall():
 # python view_history.py
 ```
 
-### 3. Run System Compatibility Check
+### 3. Check Recovery History
+
+```python
+# Save as view_recovery.py
+import sqlite3
+
+conn = sqlite3.connect("workflow_history.db")
+conn.row_factory = sqlite3.Row
+cursor = conn.cursor()
+
+cursor.execute("SELECT * FROM recovery_history ORDER BY timestamp DESC LIMIT 5")
+for row in cursor.fetchall():
+    print(f"ID: {row['id']}, Strategy: {row['strategy']}, Success: {row['success']}, Changes: {row['changes_count']}")
+
+# Run with:
+# python view_recovery.py
+```
+
+### 4. Run System Compatibility Check
 
 ```python
 # Save as check_system.py
@@ -297,53 +427,44 @@ async def check_system():
     print(f"- OS: {system_context['platform']['system']}")
     print(f"- Docker available: {system_context['docker_available']}")
     print(f"- Package managers: {', '.join([k for k, v in system_context['package_managers'].items() if v])}")
+    print(f"- Static analysis tools:")
+    print(f"  - shellcheck: {system_context.get('static_analysis', {}).get('shellcheck_available', False)}")
+    print(f"  - pylint: {system_context.get('static_analysis', {}).get('pylint_available', False)}")
 
 if __name__ == "__main__":
     asyncio.run(check_system())
 ```
 
-### 4. Testing Individual Components
-
-You can test individual components by creating targeted scripts:
-
-#### Test Script Generator
+### 5. Test Security Validation
 
 ```python
-# test_generator.py
+# test_security.py
 import asyncio
-from workflow_agent.scripting.generator import ScriptGenerator
-from workflow_agent.core.state import WorkflowState
+from workflow_agent.config.configuration import validate_script_security
 
-async def test_generator():
-    generator = ScriptGenerator()
-    state = WorkflowState(
-        action="install",
-        target_name="monitoring_agent",
-        integration_type="infra_agent",
-        template_path="./integrations/common_templates/install/monitoring_agent.sh.j2",
-        parameters={"license_key": "test123", "host": "localhost"}
-    )
-    result = await generator.generate_script(state)
-    print(result.get("script", result.get("error")))
+async def test_security():
+    test_script = """#!/bin/bash
+set -e
+echo "Installing test package"
+apt-get update
+apt-get install -y test-package
+echo "CHANGE:PACKAGE_INSTALLED:test-package"
+"""
+    
+    result = validate_script_security(test_script)
+    print("Security Validation Results:")
+    print(f"- Valid: {result['valid']}")
+    if "warnings" in result:
+        print("- Warnings:")
+        for warning in result["warnings"]:
+            print(f"  - {warning}")
+    if "errors" in result:
+        print("- Errors:")
+        for error in result["errors"]:
+            print(f"  - {error}")
 
 if __name__ == "__main__":
-    asyncio.run(test_generator())
-```
-
-#### Test Documentation Parser
-
-```python
-# test_parser.py
-import asyncio
-from workflow_agent.documentation.parser import DocumentationParser
-
-async def test_parser():
-    parser = DocumentationParser()
-    docs = await parser.fetch_integration_docs("infra_agent")
-    print(docs)
-
-if __name__ == "__main__":
-    asyncio.run(test_parser())
+    asyncio.run(test_security())
 ```
 
 ## Development Workflow
@@ -392,13 +513,24 @@ git commit -m "Add new feature: description"
     -   Use the evolve pattern for state changes
     -   Avoid directly modifying state objects
 
-4.  **Document Your Code**
+4.  **Use Enhanced Security Features**
+    -   Implement proper script validation
+    -   Use static analysis tools when available
+    -   Follow the principle of least privilege
+
+5.  **Implement Proper Change Tracking**
+    -   Use structured formats for change tracking
+    -   Include revert commands for all changes
+    -   Verify changes can be successfully rolled back
+
+6.  **Document Your Code**
     -   Add docstrings to classes and methods
     -   Document public interfaces thoroughly
 
-5.  **Write Tests**
+7.  **Write Tests**
     -   Create unit tests for new components
     -   Add integration tests for workflows
+    -   Include security and recovery tests
 
 ## Extending the Framework
 
@@ -422,24 +554,33 @@ new_integration_type/target_name/verification.yaml
 
 4.  Register the integration in `__init__.py` or let auto-discovery find it
 
-### Adding a New Agent
+### Adding a New Recovery Strategy
 
-1.  Create a new agent class in `multi_agent/`:
+1. Create a new strategy in `recovery/strategies/`:
 
 ```python
-# src/workflow_agent/multi_agent/new_agent.py
-class NewAgent:
-    def __init__(self, message_bus):
-        self.message_bus = message_bus
+# src/workflow_agent/recovery/strategies/my_strategy.py
+from ..base import RecoveryStrategyBase
 
-    async def initialize(self):
-        # Subscribe to relevant topics
-        await self.message_bus.subscribe("topic", self._handle_topic)
-
-    async def _handle_topic(self, message):
-        # Handle messages
+class MyRecoveryStrategy(RecoveryStrategyBase):
+    """Custom recovery strategy implementation."""
+    
+    name = "my_strategy"
+    
+    async def recover(self, state):
+        """Implement custom recovery logic."""
+        # Your recovery logic here
+        return updated_state
 ```
 
-2.  Register the agent in the `CoordinatorAgent`
+2. Register the strategy in the `RecoveryManager`:
 
-For more details on the system architecture and component relationships, refer to the [Architecture Overview](architecture-readme.md).
+```python
+# In src/workflow_agent/recovery/manager.py
+from .strategies.my_strategy import MyRecoveryStrategy
+
+# Register in the manager
+self.strategies[MyRecoveryStrategy.name] = MyRecoveryStrategy()
+```
+
+For more details on the system architecture and component relationships, refer to the [Architecture Overview](architecture-readme.md) and [Recent Fixes & Improvements](FIXED.md).

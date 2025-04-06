@@ -1,16 +1,17 @@
 # Data Flow
 
-This document details how data flows through the Workflow Agent system during execution, including command processing, state transitions, and message passing between components.
+This document details how data flows through the enhanced Workflow Agent system during execution, including command processing, state transitions, checkpoint management, and message passing between components.
 
 ## Navigation
 
--   [Overview](overview-readme.md)
+-   [Overview](README.md)
 -   [Architecture Overview](architecture-readme.md)
 -   [LLM & Agent System](llm-agents-readme.md)
 -   [Component Hierarchy](component-hierarchy-readme.md)
 -   [Developer Setup & Troubleshooting](developer-readme.md)
+-   [Recent Fixes & Improvements](FIXED.md)
 
-## Primary Data Flow Diagram
+## Enhanced Primary Data Flow Diagram
 
 ```
                                                +---------------+
@@ -21,21 +22,21 @@ This document details how data flows through the Workflow Agent system during ex
                                                        |
                                                        v
 +-------------------------+                    +-------+-------+
-|                         |    Workflow        |               |
+|                         |    Enhanced        |               |
 | Configuration System    +-------------------->  WorkflowAgent|
 | - Config files          |    Configuration   |   (Main)      |
-| - Environment variables |                    |               |
+| - Environment variables |    with validation |               |
 +-------------------------+                    +-------+-------+
                                                        |
-                                                       |
+                                                       | Create Checkpoint
                                                        v
 +-------------------------+                    +-------+-------+          +---------------+
 |                         |    Knowledge       |               |          |               |
 | Knowledge Base          +-------------------->  CoordinatorAg|  State   | Storage       |
 | - Documentation         |    Enhancement     |   (Controller)|--------->| - History     |
 | - Integration info      |                    |               |          | - Audit trail |
-+-------------------------+                    +-------+-------+          +---------------+
-                                                       |
++-------------------------+                    +-------+-------+          | - Checkpoints |
+                                                       |                  +---------------+
                                                        | Messages
                                                        v
                           +-------------------------------------------------------+
@@ -46,95 +47,142 @@ This document details how data flows through the Workflow Agent system during ex
                               |                   |                   |   |
                               |                   |                   |   |
            +------------------v--+      +---------v-------+     +----v---v--------+
-           |                     |      |                 |     |                 |
-           | Knowledge Agent     |      | Script Builder  |     | Execution Agent |
-           |                     |      |                 |     |                 |
-           +---------------------+      +-----------------+     +-----------------+
-                      |                          |                       |
-                      |  Enhanced               |                       |
-                      |  Knowledge              |                       |
-                      v                          v                       v
-         +------------+------+       +----------+---------+     +-------+-------+
-         |                   |       |                    |     |               |
-         | Documentation     |       | Script Generator   |     | Executor      |
-         | Parser            |       | + Validator        |     |               |
-         +-------------------+       +--------------------+     +-------+-------+
-                                                                        |
-                                                                        v
-                                                               +--------+--------+
-                                                               |                 |
-                                                               | Target System   |
-                                                               | (Script Execution)
-                                                               +-----------------+
+           |                     |      |                 |      |                |
+           | Knowledge Agent     |      | Script Builder  |      | Execution Agent|
+           |                     |      |                 |      |                |
+           +---------------------+      +-----------------+      +----------------+
+                      |                          |                        |
+                      |  Enhanced               |                        |
+                      |  Knowledge              |                        |
+                      v                          v                        v
+         +------------+------+       +----------+---------+     +--------+--------+
+         |                   |       |                    |     |                 |
+         | Documentation     |       | Enhanced Script    |     | Enhanced        |
+         | Parser            |       | Generator+Validator|     | Executor        |
+         +-------------------+       +--------------------+     +--------+--------+
+                                                                         |
+                                                                         v
+                                                               +---------+---------+
+                                                               |                   |
+                                                               | Target System     |
+                                                               | (Script Execution)|
+                                                               +---------+---------+
+                                                                         |
+                                                                         | Error?
+                                                                         v
+                                                               +---------+---------+
+                                                               |                   |
+                                                               | Recovery Manager  |
+                                                               | - Tiered rollback |
+                                                               | - Verification    |
+                                                               +-------------------+
 ```
 
-## Workflow State Transitions
+## Enhanced Workflow State Transitions with Checkpoints
 
-The WorkflowState object evolves through transitions as it progresses through the workflow:
+The WorkflowState object evolves through transitions with comprehensive checkpointing:
 
 ```
-             +-------------+
-             | Initial     |
-             | State       |
-             +------+------+
-                    |
-                    v
-     +-------------++--------------+
-     |                             |
-     |  Knowledge Enhancement      |
-     |  - Add documentation        |
-     |  - Platform info            |
-     +-------------+--------------+
-                   |
-                   v
-     +-------------+--------------+
-     |                             |
-     |  Strategy Selection         |
-     |  - Select best method       |
-     |  - Add scoring data         |
-     +-------------+--------------+
-                   |
-                   v
-     +-------------+--------------+
-     |                             |
-     |  Script Generation          |
-     |  - Add script               |
-     |  - Add template info        |
-     +-------------+--------------+
-                   |
-                   v
-     +-------------+--------------+
-     |                             |
-     |  Script Execution           |
-     |  - Add output data          |
-     |  - Add metrics              |
-     |  - Add changes made         |
-     +-------------+--------------+
-                   |
-                   v
-     +-------------+--------------+
-     |                             |
-     |  Verification               |
-     |  - Add verification result  |
-     |  - Add warnings             |
-     +-------------+--------------+
-                   |
-                   v
-             +-----+------+
-             | Final      |
-             | State      |
-             +------------+
+              +----------------+
+              | Initial State  |
+              +-------+--------+
+                      |
+                      v
+              +-------+--------+
+              | Initialization |
+              | Checkpoint     |
+              +-------+--------+
+                      |
+                      v
+     +----------------+-----------------+
+     |                                  |
+     | Enhanced Input Validation        |
+     | - Parameter validation           |
+     | - Integration validation         |
+     | - Environment validation         |
+     +----------------+-----------------+
+                      |
+                      v
+              +-------+--------+
+              | Validation     |
+              | Checkpoint     |
+              +-------+--------+
+                      |
+                      v
+     +----------------+-----------------+
+     |                                  |
+     | Enhanced Knowledge Enhancement   |
+     | - Add documentation              |
+     | - Platform info                  |
+     | - Security considerations        |
+     +----------------+-----------------+
+                      |
+                      v
+              +-------+--------+
+              | Generation     |
+              | Checkpoint     |
+              +-------+--------+
+                      |
+                      v
+     +----------------+-----------------+
+     |                                  |
+     | Enhanced Script Generation       |
+     | - Add script                     |
+     | - Add template info              |
+     | - Multiple security validations  |
+     +----------------+-----------------+
+                      |
+                      v
+              +-------+--------+
+              | Execution      |
+              | Checkpoint     |
+              +-------+--------+
+                      |
+                      v
+     +----------------+-----------------+
+     |                                  |
+     | Enhanced Script Execution        |
+     | - Add output data                |
+     | - Add metrics                    |
+     | - Robust change tracking         |
+     +----------------+-----------------+
+                      |
+                      v
+              +-------+--------+
+              | Verification   |
+              | Checkpoint     |
+              +-------+--------+
+                      |
+                      v
+     +----------------+-----------------+
+     |                                  |
+     | Enhanced Verification            |
+     | - Add verification result        |
+     | - System state validation        |
+     | - Add warnings                   |
+     +----------------+-----------------+
+                      |
+                      v
+              +-------+--------+
+              | Completion     |
+              | Checkpoint     |
+              +-------+--------+
+                      |
+                      v
+              +-------+--------+
+              | Final State    |
+              +----------------+
 ```
 
-## Key Data Structures
+## Enhanced State Structure
 
-### 1. WorkflowState
+### 1. Enhanced WorkflowState
 
-The immutable state object contains all workflow information:
+The immutable state object with enhanced recovery capabilities:
 
 ```
 +------------------------------------------------------------+
-|                     WorkflowState                           |
+|                     Enhanced WorkflowState                  |
 +------------------------------------------------------------+
 | - action: str (install, remove, verify)                     |
 | - target_name: str (integration target)                     |
@@ -144,196 +192,235 @@ The immutable state object contains all workflow information:
 | - system_context: Dict[str, Any] (platform information)     |
 | - script: Optional[str] (generated script)                  |
 | - template_key: Optional[str] (template identifier)         |
-| - changes: List[Change] (changes during execution)          |
+|                                                             |
+| - changes: List[Change] (enhanced change tracking)          |
 | - output: Optional[OutputData] (execution result)           |
 | - metrics: Optional[ExecutionMetrics] (performance metrics) |
 | - warnings: List[str] (non-fatal issues)                    |
 | - error: Optional[str] (error message if failed)            |
+|                                                             |
+| # Enhanced recovery features                                |
+| - current_stage: WorkflowStage (current workflow stage)     |
+| - checkpoints: Dict[str, Any] (stage checkpoints)           |
+| - retry_count: int (number of retries)                      |
+| - backup_files: List[str] (backup file tracking)            |
+| - verification_results: Dict[str, Any] (verification data)  |
+| - rollback_script: Optional[str] (generated rollback script)|
+| - recovery_strategy: Optional[str] (recovery approach)      |
 +------------------------------------------------------------+
 ```
 
-### 2. Message Format
+### 2. Enhanced Change Tracking
 
-Messages passed between agents follow this structure:
+The enhanced Change object with improved rollback support:
+
+```
++------------------------------------------------------------+
+|                      Enhanced Change                        |
++------------------------------------------------------------+
+| - type: str (change type)                                   |
+| - target: str (affected target)                             |
+| - revertible: bool (can be reverted)                        |
+| - revert_command: Optional[str] (command to revert)         |
+| - backup_file: Optional[str] (backup file location)         |
+| - timestamp: datetime (when change was made)                |
+| - change_id: UUID (unique identifier)                       |
+| - metadata: Dict[str, Any] (additional data)                |
+|                                                             |
+| # New verification fields                                   |
+| - verified: bool (whether change was verified)              |
+| - rollback_attempted: bool (rollback was attempted)         |
+| - rollback_success: Optional[bool] (rollback succeeded)     |
++------------------------------------------------------------+
+```
+
+### 3. Enhanced Message Format
+
+Messages passed between agents with improved error handling:
 
 ```
 +-----------------------------------------------------------+
-|                        Message                             |
+|                    Enhanced Message                        |
 +-----------------------------------------------------------+
 | - workflow_id: str (unique workflow identifier)            |
 | - state: Dict[str, Any] (serialized workflow state)        |
-| - status: str (in_progress, success, failed)               |
+| - status: str (in_progress, success, failed, retrying)     |
 | - stage: str (current workflow stage)                      |
 | - config: Optional[Dict[str, Any]] (configuration)         |
+| - checkpoint_id: Optional[str] (checkpoint identifier)     |
+| - retry_count: int (number of retries)                     |
 | - additional_data: Dict[str, Any] (contextual information) |
 +-----------------------------------------------------------+
 ```
 
-## Message Topics
+## Enhanced Message Topics
 
-The system uses a publish-subscribe pattern with the following primary topics:
+The system uses a publish-subscribe pattern with the following enhanced topics:
 
 ```
 +-------------------+----------------------------------------+
 | Topic             | Description                            |
 +-------------------+----------------------------------------+
+| workflow_start    | Workflow initiation with validation    |
+| workflow_checkpoint| Checkpoint created                    |
 | retrieve_knowledge| Knowledge retrieval request            |
 | knowledge_retrieved| Knowledge retrieval completed         |
 | generate_script   | Script generation request              |
 | script_generated  | Script generation completed            |
-| validate_script   | Script validation request              |
+| validate_script   | Enhanced script validation request     |
 | script_validated  | Script validation completed            |
 | execute_script    | Script execution request               |
 | execution_complete| Script execution completed             |
-| verify_result     | Verification request                   |
+| verify_result     | Enhanced verification request          |
 | verification_complete| Verification completed              |
 | analyze_failure   | Failure analysis request               |
 | improvement_generated| Improvement suggestion completed    |
 | error             | Error notification                     |
+| recovery_start    | Recovery initiation                    |
+| recovery_complete | Recovery completion                    |
+| rollback_start    | Rollback initiation                    |
+| rollback_complete | Rollback completion                    |
 +-------------------+----------------------------------------+
 ```
 
-## Data Flow Examples
+## Enhanced Data Flow Examples
 
-### 1. Installation Workflow Data Flow
+### 1. Enhanced Installation Workflow Data Flow
 
 ```
 1. Initial Request:
    CLI/API -> WorkflowAgent -> CoordinatorAgent
    Data: {action: "install", target_name: "monitoring_agent", parameters: {...}}
 
-2. Knowledge Retrieval:
+2. Input Validation:
+   WorkflowAgent -> Validate all inputs
+   Data: Parameters, environment, integrations
+
+3. Knowledge Retrieval:
    CoordinatorAgent -> KnowledgeAgent -> DocumentationParser
    Data: Integration type, target name, platform context
+   Checkpoint: Create Initialization checkpoint
 
-3. Knowledge Enhancement:
+4. Knowledge Enhancement:
    DocumentationParser -> KnowledgeAgent -> CoordinatorAgent
    Data: Documentation knowledge, recommended approaches
+   Checkpoint: Create Knowledge checkpoint
 
-4. Strategy Selection:
+5. Strategy Selection:
    CoordinatorAgent -> InstallationStrategy -> CoordinatorAgent
    Data: Available methods, scoring, selected approach
 
-5. Script Generation:
+6. Enhanced Script Generation:
    CoordinatorAgent -> ScriptBuilder -> ScriptGenerator
    Data: Template selection, variable substitution
+   Checkpoint: Create Generation checkpoint
 
-6. Script Validation:
+7. Enhanced Script Validation:
    ScriptGenerator -> ScriptValidator -> ScriptBuilder
-   Data: Generated script, validation results
+   Data: Generated script, multiple validation results (static analysis, security patterns)
 
-7. Script Execution:
+8. Enhanced Script Execution:
    CoordinatorAgent -> ExecutionAgent -> ScriptExecutor
    Data: Validated script, execution context
+   Checkpoint: Create Execution checkpoint
 
-8. Result Verification:
-   ExecutionAgent -> Verifier -> ExecutionAgent
-   Data: Execution output, verification criteria
+9. Enhanced Change Tracking:
+   ScriptExecutor -> Process change markers -> WorkflowState
+   Data: Detailed changes with backup files and metadata
 
-9. Final Result:
-   ExecutionAgent -> CoordinatorAgent -> CLI/API
-   Data: Execution result, status, metrics
+10. Enhanced Result Verification:
+    ExecutionAgent -> Verifier -> ExecutionAgent
+    Data: Execution output, verification criteria, system state checks
+    Checkpoint: Create Verification checkpoint
+
+11. Final Result:
+    ExecutionAgent -> CoordinatorAgent -> CLI/API
+    Data: Execution result, status, metrics
+    Checkpoint: Create Completion checkpoint
 ```
 
-### 2. Failure Recovery Data Flow
+### 2. Enhanced Failure Recovery Data Flow
 
 ```
 1. Execution Failure:
    ScriptExecutor -> ExecutionAgent -> CoordinatorAgent
    Data: Error details, execution output
 
-2. Failure Analysis:
-   CoordinatorAgent -> ImprovementAgent
-   Data: Error details, workflow state
+2. Recovery Planning:
+   CoordinatorAgent -> RecoveryManager
+   Data: Error type, retry eligibility, last checkpoint
 
-3. Rollback Initiation: ## File: data-flow-readme.md (continued)
-```markdown
-3. Rollback Initiation:
+3. Retry Decision:
+   RecoveryManager -> Decision point (can retry?)
+   If yes: Return to appropriate checkpoint
+   If no: Proceed to rollback
+
+4. Enhanced Rollback Initiation:
    CoordinatorAgent -> RecoveryManager
    Data: Workflow state, changes to revert
 
-4. Rollback Execution:
+5. Tiered Rollback Strategy:
+   RecoveryManager -> Choose strategy (full, staged, individual)
+   Data: Change types, severity, system context
+
+6. Enhanced Rollback Execution:
    RecoveryManager -> ScriptExecutor
-   Data: Generated rollback script
+   Data: Generated rollback script with error handling
 
-5. Improvement Analysis:
-   ImprovementAgent -> KnowledgeBase
-   Data: Root cause analysis, suggested improvements
+7. Rollback Verification:
+   RecoveryManager -> VerificationManager
+   Data: System state after rollback
 
-6. Result Notification:
+8. Enhanced Result Notification:
    CoordinatorAgent -> CLI/API
-   Data: Error information, rollback status
+   Data: Error information, recovery outcome, partial success details
 ```
 
-## State Evolution Examples
+## Retry and Recovery Flow
 
-The following examples illustrate how state evolves during workflows:
-
-### Installation Workflow State Evolution
+The new retry and recovery flow allows for partial workflow recovery:
 
 ```
-1. Initial State:
-   {
-     "action": "install",
-     "target_name": "monitoring_agent",
-     "integration_type": "infra_agent",
-     "parameters": {
-       "license_key": "abc123",
-       "host": "localhost"
-     },
-     "system_context": {
-       "platform": {"system": "linux", "distribution": "ubuntu"}
-     }
-   }
-
-2. Knowledge Enhanced State:
-   {
-     ... (previous state) ...,
-     "template_data": {
-       "docs": { ... documentation data ... },
-       "platform_specific": { ... filtered data ... }
-     }
-   }
-
-3. Strategy Selected State:
-   {
-     ... (previous state) ...,
-     "selected_method": { ... method details ... },
-     "method_scores": { ... scoring details ... }
-   }
-
-4. Script Generated State:
-   {
-     ... (previous state) ...,
-     "script": "#!/bin/bash\n...",
-     "template_key": "install/monitoring_agent.sh.j2"
-   }
-
-5. Execution Complete State:
-   {
-     ... (previous state) ...,
-     "output": {
-       "stdout": "...",
-       "stderr": "...",
-       "exit_code": 0
-     },
-     "changes": [
-       {"type": "create", "target": "/opt/monitoring", ...},
-       {"type": "config", "target": "config.yaml", ...}
-     ],
-     "metrics": {
-       "duration": 2.5,
-       "start_time": "...",
-       "end_time": "..."
-     }
-   }
-
-6. Verification Complete State:
-   {
-     ... (previous state) ...,
-     "verification_result": true,
-     "warnings": []
-   }
+             +---------------+
+             | Error Occurs  |
+             +-------+-------+
+                     |
+                     v
+             +-------+-------+
+             | Is Error      |
+             | Retryable?    |
+             +-------+-------+
+             /               \
+            /                 \
+           / Yes               \ No
+          v                     v
+  +-------+-------+     +-------+-------+
+  | Find Last     |     | Start          |
+  | Checkpoint    |     | Rollback       |
+  +-------+-------+     +-------+-------+
+          |                     |
+          v                     v
+  +-------+-------+     +-------+-------+
+  | Retry From     |     | Try Full      |
+  | Checkpoint     |     | Rollback      |
+  +-------+-------+     +-------+-------+
+      Success?               Success?
+          /  \                  /  \
+         /    \                /    \
+ Yes    /      \    No  Yes   /      \    No
+       v        v            v        v
+  +-------+ +---+---+   +----+--+ +---+---+
+  | Resume | | Retry  |   | Done  | | Try    |
+  | Flow   | | Limit? |   |       | | Staged |
+  +-------+ +---+---+   +----+--+ +---+---+
+                 | No           Success?
+                 v                /  \
+            +----+---+           /    \
+            | Start  |   Yes    /      \    No
+            | Staged |<--------+        +----->+------+
+            | Rollback                        | Try   |
+            +--------+                        | Indiv.|
+                                              +---+---+
 ```
 
 For a more detailed understanding of how to set up the system and troubleshoot issues, see the [Developer Setup & Troubleshooting](developer-readme.md) guide.

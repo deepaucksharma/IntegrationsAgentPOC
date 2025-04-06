@@ -15,14 +15,24 @@ logger = logging.getLogger(__name__)
 
 # Patterns that might indicate dangerous operations
 DANGEROUS_PATTERNS = [
-    r"rm\s+-rf\s+/",
-    r"rm\s+-rf\s+~",
-    r"chmod\s+-R\s+777",
-    r"dd\s+if=/dev/urandom",
-    r":\(\)\s*{\s*:\|:&\s*};:",  # Fork bomb pattern
-    r"eval.*\$\(curl",
-    r"wget.*\|\s*bash",
-    r"curl.*\|\s*bash",
+    r"rm\s+-rf\s+/",                # Delete root directory
+    r"rm\s+-rf\s+~",                # Delete home directory
+    r"rm\s+-rf\s+\.\.",             # Delete parent directory
+    r"chmod\s+-R\s+777",            # Set insecure permissions
+    r"dd\s+if=/dev/urandom",        # Potentially destructive disk operations
+    r":\(\)\s*{\s*:\|:&\s*};:",     # Fork bomb pattern
+    r"eval.*\$\(curl",              # Execute code from internet
+    r"wget.*\|\s*bash",             # Execute code from internet
+    r"curl.*\|\s*bash",             # Execute code from internet
+    r".*>\s*/dev/sd[a-z]",          # Write directly to disk device
+    r"rm\s+-rf\s+/\*",              # Delete all files in root
+    r"mkfs\..*\s+/dev/sd[a-z]",     # Format disk
+    r"fdisk\s+/dev/sd[a-z]",        # Partition disk
+    r"dd\s+.*\s+of=/dev/sd[a-z]",   # Low-level disk writing
+    r"shutdown",                    # System shutdown
+    r"reboot",                      # System reboot
+    r"poweroff",                    # System power off
+    r"halt",                        # System halt
 ]
 
 class WorkflowConfiguration(BaseModel):
@@ -312,37 +322,126 @@ def merge_configs(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, A
 
 def validate_script_security(script_content: str) -> Dict[str, Any]:
     """
-    Validate script content for potentially dangerous operations.
+    Validate script content for potentially dangerous operations using multiple methods.
     
     Args:
         script_content: Script content to validate
         
     Returns:
-        Dict with validation results (valid: bool, warnings: list)
+        Dict with validation results (valid: bool, warnings: list, errors: list)
     """
     warnings = []
+    errors = []
     
     # Check for dangerous patterns
     for pattern in DANGEROUS_PATTERNS:
         if re.search(pattern, script_content, re.IGNORECASE):
-            warnings.append(f"Potentially dangerous pattern detected: {pattern}")
+            errors.append(f"Dangerous pattern detected: {pattern}")
     
     # Check for suspicious commands based on context
     suspicious_cmds = [
-        "format",
-        "mkfs",
-        "fdisk",
-        "wget.*sudo",
-        "curl.*sudo",
-        "shutdown",
-        "reboot"
+        r"\bformat\b",
+        r"\bmkfs\b",
+        r"\bfdisk\b",
+        r"wget.*sudo",
+        r"curl.*sudo",
+        r"\bshutdown\b",
+        r"\breboot\b",
+        r"\bservice\s+.*\s+stop\b",
+        r"\bsystemctl\s+stop\b",
+        r"\bkill\s+-9\b",
+        r"\bkillall\b",
+        r"\biptables\s+-F\b"
     ]
     
     for cmd in suspicious_cmds:
-        if re.search(rf"\b{cmd}\b", script_content, re.IGNORECASE):
+        if re.search(cmd, script_content, re.IGNORECASE):
             warnings.append(f"Suspicious command detected: {cmd}")
     
+    # Check for common syntax errors
+    syntax_errors = [
+        r"if\s+\[\s*[^]]+$",                # Unclosed if statement brackets
+        r"\bfi\b\s*\bfi\b",                 # Double "fi" closure
+        r"\besac\b\s*\besac\b",             # Double "esac" closure
+        r"\bdone\b\s*\bdone\b",             # Double "done" closure
+        r"^\s*}\s*$",                       # Standalone closing brace
+        r"\$\(\(",                          # Missing closing parenthesis in arithmetic expansion
+    ]
+    
+    for error_pattern in syntax_errors:
+        if re.search(error_pattern, script_content, re.MULTILINE):
+            warnings.append(f"Potential syntax error: {error_pattern}")
+    
+    # Try to use shellcheck if available for shell scripts
+    try:
+        if "#!/bin/bash" in script_content or "#!/bin/sh" in script_content:
+            with tempfile.NamedTemporaryFile(suffix=".sh", delete=False) as temp:
+                temp_path = temp.name
+                temp.write(script_content.encode())
+            
+            try:
+                # Run shellcheck to find issues
+                result = subprocess.run(
+                    ["shellcheck", "-f", "json", temp_path],
+                    capture_output=True, text=True, check=False
+                )
+                
+                if result.returncode == 0:
+                    logger.debug("Shellcheck validation passed")
+                else:
+                    try:
+                        shellcheck_output = json.loads(result.stdout)
+                        for issue in shellcheck_output:
+                            level = issue.get("level", "").lower()
+                            message = issue.get("message", "")
+                            
+                            if level == "error":
+                                errors.append(f"Shellcheck error: {message}")
+                            else:
+                                warnings.append(f"Shellcheck warning: {message}")
+                    except json.JSONDecodeError:
+                        warnings.append("Failed to parse shellcheck output")
+            finally:
+                try:
+                    os.unlink(temp_path)
+                except:
+                    pass
+    except FileNotFoundError:
+        logger.warning("Shellcheck not available for additional validation")
+    except Exception as e:
+        logger.warning(f"Shellcheck validation error: {e}")
+    
+    # Validate PowerShell on Windows systems
+    if os.name == 'nt' and ('<#' in script_content or 'function ' in script_content or '$ErrorActionPreference' in script_content):
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".ps1", delete=False) as temp:
+                temp_path = temp.name
+                temp.write(script_content.encode())
+            
+            try:
+                # Check PowerShell syntax
+                result = subprocess.run(
+                    ["powershell", "-Command", f"$ErrorActionPreference='Stop'; $null = [System.Management.Automation.PSParser]::Tokenize((Get-Content -Raw '{temp_path}'), [ref]$null)"],
+                    capture_output=True, text=True, check=False
+                )
+                
+                if result.returncode != 0:
+                    for line in result.stderr.splitlines():
+                        if line.strip():
+                            errors.append(f"PowerShell syntax error: {line.strip()}")
+            finally:
+                try:
+                    os.unlink(temp_path)
+                except:
+                    pass
+        except Exception as e:
+            warnings.append(f"PowerShell validation error: {e}")
+    
+    # Determine overall validity - if there are errors, it's not valid
+    valid = len(errors) == 0
+    
     return {
-        "valid": len(warnings) == 0,
-        "warnings": warnings
+        "valid": valid,
+        "warnings": warnings,
+        "errors": errors
     }

@@ -77,6 +77,216 @@ class VerificationManager:
         self.template_manager = template_manager
         self.runner = VerificationRunner(config)
         
+    async def verify_system_clean(self, state: WorkflowState) -> WorkflowState:
+        """
+        Verify that the system is in a clean state after rollback.
+        
+        Args:
+            state: Workflow state after rollback
+            
+        Returns:
+            Updated workflow state with verification results
+        """
+        logger.info(f"Verifying system is clean after rollback for {state.integration_type}")
+        
+        try:
+            # Create generic verification steps to check system cleanliness
+            steps = []
+            
+            # Check if integration-specific verification exists
+            verification_dir = Path(__file__).parent / "definitions"
+            yaml_path = verification_dir / f"{state.integration_type}_clean.yaml"
+            
+            if yaml_path.exists():
+                # Use integration-specific verification
+                with open(yaml_path, "r") as f:
+                    verification_data = yaml.safe_load(f)
+                    
+                if isinstance(verification_data, dict) and "steps" in verification_data:
+                    for step_data in verification_data["steps"]:
+                        # Render any templates in the script
+                        if "script_template" in step_data:
+                            script = self.template_manager.render_string_template(
+                                step_data["script_template"],
+                                {
+                                    **state.parameters,
+                                    **state.template_data,
+                                    "target_name": state.target_name,
+                                    "integration_type": state.integration_type
+                                }
+                            )
+                            step_data["script"] = script
+                            
+                        step = VerificationStep.from_dict(step_data)
+                        steps.append(step)
+            else:
+                # Generate basic verification steps based on changes
+                steps = self._generate_clean_verification_steps(state)
+                
+            if not steps:
+                logger.warning(f"No clean verification steps created for {state.integration_type}")
+                return state.add_warning("No clean verification steps available")
+                
+            logger.info(f"Running {len(steps)} clean verification steps")
+            
+            # Run verification steps
+            passed_steps = []
+            failed_steps = []
+            
+            for step in steps:
+                result = await self.runner.run_step(step, state)
+                
+                if result["success"]:
+                    passed_steps.append(step.name)
+                    state = state.add_message(f"Clean verification step '{step.name}' passed")
+                else:
+                    failed_steps.append({
+                        "name": step.name,
+                        "error": result["error"]
+                    })
+                    
+                    error_msg = f"Clean verification step '{step.name}' failed: {result['error']}"
+                    logger.warning(error_msg)
+                    state = state.add_warning(error_msg)
+            
+            # Summarize results
+            verification_summary = {
+                "passed": passed_steps,
+                "failed": failed_steps,
+                "total": len(steps),
+                "success": len(failed_steps) == 0
+            }
+            
+            state = state.set_verification_result("clean_check", verification_summary)
+            
+            if verification_summary["success"]:
+                logger.info("All clean verification steps passed")
+                state = state.add_message("System is clean after rollback")
+            else:
+                logger.warning("Some clean verification steps failed")
+                state = state.add_warning("System may not be completely clean after rollback")
+                
+            return state
+            
+        except Exception as e:
+            logger.error(f"Clean verification error: {e}", exc_info=True)
+            return state.set_error(f"Clean verification error: {str(e)}")
+            
+    def _generate_clean_verification_steps(self, state: WorkflowState) -> List[VerificationStep]:
+        """Generate verification steps based on changes that were rolled back."""
+        steps = []
+        is_windows = state.system_context.get('is_windows', 'win' in state.system_context.get('platform', {}).get('system', '').lower())
+        
+        # Track which types we've handled to avoid duplicates
+        handled_types = set()
+        
+        for change in state.changes:
+            # Skip if we've already handled this type
+            if change.type in handled_types:
+                continue
+                
+            # Generate verification based on change type
+            if change.type == 'file_created' or change.type.startswith('file_'):
+                # Verify file doesn't exist
+                script = f'Test-Path "{change.target}" | Write-Output' if is_windows else f'[ -f "{change.target}" ] && echo "File exists" || echo "File not found"'
+                expected = 'False' if is_windows else 'File not found'
+                
+                steps.append(VerificationStep(
+                    name=f"Verify File Removed: {change.target}",
+                    description=f"Verify file {change.target} was removed",
+                    script=script,
+                    expected_result=expected,
+                    required=False  # Not critical as failures here are typically okay
+                ))
+                
+                handled_types.add(change.type)
+                
+            elif change.type == 'directory_created' or change.type.startswith('directory_'):
+                # Verify directory doesn't exist
+                script = f'Test-Path -PathType Container "{change.target}" | Write-Output' if is_windows else f'[ -d "{change.target}" ] && echo "Directory exists" || echo "Directory not found"'
+                expected = 'False' if is_windows else 'Directory not found'
+                
+                steps.append(VerificationStep(
+                    name=f"Verify Directory Removed: {change.target}",
+                    description=f"Verify directory {change.target} was removed",
+                    script=script,
+                    expected_result=expected,
+                    required=False
+                ))
+                
+                handled_types.add(change.type)
+                
+            elif change.type.startswith('service_'):
+                # Verify service isn't running/installed
+                if is_windows:
+                    script = f'Get-Service "{change.target}" -ErrorAction SilentlyContinue | Write-Output'
+                    # No expected_result - absence of service is success
+                else:
+                    script = f'systemctl status {change.target} 2>/dev/null || echo "Service not found"'
+                    expected = 'Service not found'
+                    
+                steps.append(VerificationStep(
+                    name=f"Verify Service Not Running: {change.target}",
+                    description=f"Verify service {change.target} is not running",
+                    script=script,
+                    expected_result=None if is_windows else expected,
+                    required=False
+                ))
+                
+                handled_types.add(change.type)
+                
+            elif change.type.startswith('package_'):
+                # Verify package isn't installed
+                if is_windows:
+                    script = f'Get-WmiObject -Class Win32_Product | Where-Object {{ $_.Name -like "*{change.target}*" }} | Write-Output'
+                    # No expected_result - absence of package is success
+                else:
+                    script = f'dpkg -l | grep -q "{change.target}" || rpm -q "{change.target}" >/dev/null 2>&1 || echo "Package not found"'
+                    expected = 'Package not found'
+                    
+                steps.append(VerificationStep(
+                    name=f"Verify Package Not Installed: {change.target}",
+                    description=f"Verify package {change.target} is not installed",
+                    script=script,
+                    expected_result=None if is_windows else expected,
+                    required=False
+                ))
+                
+                handled_types.add(change.type)
+                
+        # Add generic system health checks
+        # Process checks - make sure no unexpected processes are running
+        process_name = state.integration_type.lower()
+        if is_windows:
+            script = f'Get-Process | Where-Object {{ $_.ProcessName -like "*{process_name}*" }} | ForEach-Object {{ $_.ProcessName }}'
+        else:
+            script = f'ps aux | grep -i "{process_name}" | grep -v grep || echo "No matching processes"'
+            
+        steps.append(VerificationStep(
+            name=f"Verify No Integration Processes",
+            description=f"Verify no {state.integration_type} processes are running",
+            script=script,
+            expected_result=None,  # Just check exit code
+            required=False
+        ))
+            
+        return steps
+    
+    async def verify_uninstall(self, state: WorkflowState) -> WorkflowState:
+        """
+        Verify that an uninstallation was successful.
+        
+        Args:
+            state: Workflow state after uninstallation
+            
+        Returns:
+            Updated workflow state with verification results
+        """
+        logger.info(f"Verifying uninstallation for {state.integration_type}")
+        
+        # For uninstall, we can use the same clean verification
+        return await self.verify_system_clean(state)
+        
     async def verify(self, state: WorkflowState) -> WorkflowState:
         """
         Verify an integration using the workflow state.

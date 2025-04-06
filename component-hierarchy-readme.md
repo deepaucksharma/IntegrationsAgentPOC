@@ -1,14 +1,15 @@
 # Component Hierarchy
 
-This document outlines the hierarchical structure of the Workflow Agent framework's components and their relationships.
+This document outlines the hierarchical structure of the Workflow Agent framework's components and their relationships with enhanced security, state management, and recovery capabilities.
 
 ## Navigation
 
--   [Overview](overview-readme.md)
+-   [Overview](README.md)
 -   [Architecture Overview](architecture-readme.md)
 -   [LLM & Agent System](llm-agents-readme.md)
 -   [Data Flow](data-flow-readme.md)
 -   [Developer Setup & Troubleshooting](developer-readme.md)
+-   [Recent Fixes & Improvements](FIXED.md)
 
 ## Component Tree
 
@@ -16,12 +17,12 @@ This document outlines the hierarchical structure of the Workflow Agent framewor
 workflow_agent/
 |
 +-- core/                          # Core framework components
-|   |-- state.py                   # Immutable state management
+|   |-- state.py                   # Enhanced immutable state management with checkpointing
 |   |-- message_bus.py             # Pub/sub communication
 |   |-- container.py               # Dependency injection
 |
 +-- config/                        # Configuration management
-|   |-- configuration.py           # Configuration validation
+|   |-- configuration.py           # Enhanced configuration validation with security checks
 |   |-- loader.py                  # Config file loading
 |   |-- templates.py               # Template management
 |
@@ -46,12 +47,12 @@ workflow_agent/
 |
 +-- scripting/                     # Script generation
 |   |-- generator.py               # Script generator
-|   |-- validator.py               # Script validation
+|   |-- validator.py               # Enhanced script validation with static analysis
 |   |-- dynamic_generator.py       # Dynamic script creation
 |
 +-- execution/                     # Script execution
-|   |-- executor.py                # Script execution engine
-|   |-- isolation.py               # Execution isolation methods
+|   |-- executor.py                # Enhanced script execution with robust change tracking
+|   |-- isolation.py               # Improved execution isolation methods
 |
 +-- storage/                       # Data persistence
 |   |-- history.py                 # Execution history
@@ -60,41 +61,45 @@ workflow_agent/
 +-- strategy/                      # Decision strategies
 |   |-- installation.py            # Installation strategy selection
 |
-+-- rollback/                      # Error recovery
-|   |-- recovery.py                # Rollback management
++-- recovery/                      # Enhanced error recovery
+|   |-- manager.py                 # Recovery management with multiple strategies
+|
++-- rollback/                      # Rollback operations
+|   |-- recovery.py                # Enhanced rollback with verification
 |
 +-- verification/                  # Result verification
 |   |-- verifier.py                # Verification engine
 |   |-- dynamic.py                 # Dynamic verification building
+|   |-- manager.py                 # Manages verification with system state checks
 |
 +-- error/                         # Error handling
 |   |-- exceptions.py              # Custom exceptions
 |
 +-- utils/                         # Utility components
-|   |-- logging.py                 # Logging setup
+|   |-- logging.py                 # Enhanced logging setup
 |   |-- system.py                  # System detection
 |   |-- platform_manager.py        # Platform-specific operations
 |   |-- resource_manager.py        # Resource management
 |
-+-- main.py                        # Main entry point
++-- main.py                        # Enhanced main entry point with workflow stages
 ```
 
 ## Key Component Details
 
-### 1. Core Components
+### 1. Core Components - Enhanced State Management
 
 ```
-+------------------+       +--------------------+        +------------------+
-|                  |       |                    |        |                  |
-| WorkflowState    |<----->| MessageBus         |<------>| DependencyContnr |
-| - Immutable      |       | - Pub/sub system   |        | - Component      |
-| - Audit trail    |       | - Async messaging  |        |   lifecycle      |
-| - Evolution      |       | - History tracking |        | - Initialization |
-+------------------+       +--------------------+        +------------------+
++---------------------+       +-----------------------+        +------------------+
+|                     |       |                       |        |                  |
+| WorkflowState       |<----->| MessageBus            |<------>| DependencyContnr |
+| - Immutable         |       | - Pub/sub system      |        | - Component      |
+| - Checkpoint support|       | - Async messaging     |        |   lifecycle      |
+| - Workflow stages   |       | - Enhanced tracking   |        | - Initialization |
++---------------------+       +-----------------------+        +------------------+
 ```
 
--   **WorkflowState**: Core state management using immutable patterns
--   **MessageBus**: Asynchronous message passing system between components
+-   **WorkflowState**: Core state management with enhanced immutable patterns, checkpoint support, and workflow stages
+-   **MessageBus**: Asynchronous message passing system between components with improved reliability
 -   **DependencyContainer**: Manages component dependencies and lifecycle
 
 ### 2. Multi-Agent Components
@@ -102,13 +107,13 @@ workflow_agent/
 The multi-agent system architecture is divided into specialized agents:
 
 ```
-                        +------------------------+
-                        |                        |
-                        | CoordinatorAgent       |
-                        | - Workflow orchestration|
-                        | - Plan execution       |
-                        |                        |
-                        +------------------------+
+                        +---------------------------------+
+                        |                                 |
+                        | CoordinatorAgent                |
+                        | - Enhanced workflow orchestration|
+                        | - Retry and recovery management |
+                        | - Checkpoint tracking           |
+                        +---------------------------------+
                             ^       ^      ^
                             |       |      |
                     +-------+       |      +-------+
@@ -125,88 +130,89 @@ The multi-agent system architecture is divided into specialized agents:
                              +-----------------+
 ```
 
--   **CoordinatorAgent**: Manages workflow lifecycle and coordination between agents
+-   **CoordinatorAgent**: Manages workflow lifecycle with enhanced error handling and recovery
 -   **KnowledgeAgent**: Handles documentation retrieval and knowledge management
--   **ScriptBuilderAgent**: Generates and validates scripts based on knowledge
--   **ExecutionAgent**: Runs scripts and verifies results
+-   **ScriptBuilderAgent**: Generates and validates scripts with improved security checks
+-   **ExecutionAgent**: Runs scripts with robust change tracking and verification
 -   **ImprovementAgent**: Analyzes failures and improves future executions
 
-### 3. Integration Components
-
-The integration system provides a pluggable architecture for different types of integrations:
+### 3. Enhanced Script Validation and Execution
 
 ```
-+------------------+       +--------------------+
-|                  |       |                    |
-| IntegrationBase  |------>| IntegrationRegistry|
-| - Base class for |       | - Dynamic discovery|
-|   all integrations       | - Target mapping   |
-|                  |       |                    |
-+------------------+       +--------------------+
-        ^                           |
-        |                           v
-+-------+------------+     +------------------+
-|                    |     |                  |
-| ConcreteIntegrations     | Integration      |
-| - Specific plugins |     | Templates        |
-| - YAML definitions |     | - Jinja templates|
-+--------------------+     +------------------+
++------------------------+       +-------------------------+       +----------------------+
+|                        |       |                         |       |                      |
+| ScriptGenerator        |<----->| Enhanced ScriptValidator|<----->| Static Analysis      |
+| - Template-based       |       | - Multiple validation   |       | - Shell script checks|
+| - Dynamic generation   |       |   layers                |       | - PowerShell checks  |
+| - Error handling       |       | - Security pattern      |       | - Python validation  |
+|                        |       |   detection             |       |                      |
++------------------------+       +-------------------------+       +----------------------+
+        ^                                     ^
+        |                                     |
++-------+--------------------+     +----------+-----------+
+|                            |     |                      |
+| DynamicGenerator           |     | TemplateLoader       |
+| - Documentation            |     | - Enhanced template  |
+|   based generation         |     |   discovery          |
+|                            |     |                      |
++----------------------------+     +----------------------+
 ```
 
--   **IntegrationBase**: Abstract base class for all integrations
--   **IntegrationRegistry**: Auto-discovery and registration of integration plugins
--   **Integration Templates**: Jinja templates for script generation
+-   **ScriptGenerator**: Creates scripts from templates with improved error handling
+-   **ScriptValidator**: Enhanced validation with multiple layers of security and correctness checks
+-   **Static Analysis**: Integration with tools like shellcheck for shell scripts
 
-### 4. Script Generation Components
-
-```
-+------------------+       +--------------------+       +------------------+
-|                  |       |                    |       |                  |
-| ScriptGenerator  |<----->| TemplateRenderer   |<----->| ScriptValidator  |
-| - Template-based |       | - Jinja2 templating|       | - Security checks|
-| - Dynamic        |       | - Variable         |       | - Syntax         |
-|                  |       |   substitution     |       |   validation     |
-+------------------+       +--------------------+       +------------------+
-        ^                           ^
-        |                           |
-+-------+------------+     +--------+---------+
-|                    |     |                  |
-| DynamicGenerator   |     | TemplateLoader   |
-| - Documentation    |     | - Find templates |
-|   based generation |     | - Load from      |
-|                    |     |   multiple paths |
-+--------------------+     +------------------+
-```
-
--   **ScriptGenerator**: Creates scripts from templates with variable substitution
--   **ScriptValidator**: Validates scripts for security and correctness
--   **DynamicGenerator**: Generates scripts based on documentation knowledge
-
-### 5. Execution Components
+### 4. Enhanced Execution and Recovery Components
 
 ```
-+------------------+       +--------------------+       +------------------+
-|                  |       |                    |       |                  |
-| ScriptExecutor   |<----->| IsolationMethods   |<----->| ResourceManager  |
-| - Runs scripts   |       | - Direct execution |       | - Docker isolation |
-| - Monitors       |       |                    |       | - Resource       |
-|   execution      |       |                    |       |   cleanup        |
-+------------------+       +--------------------+       +------------------+
-        ^                                                       ^
-        |                                                       |
-        v                                                       v
-+------------------+                                   +------------------+
-|                  |                                   |                  |
-| RecoveryManager  |                                   | ResourceLimiter  |
-| - Error handling |                                   | - Memory limits  |
-| - Rollback       |                                   | - Concurrent     |
-|   operations     |                                   |   execution      |
-+------------------+                                   +------------------+
++------------------------+       +-------------------------+       +----------------------+
+|                        |       |                         |       |                      |
+| Enhanced ScriptExecutor|<----->| IsolationMethods        |<----->| ResourceManager      |
+| - Robust change tracking       | - Direct execution      |       | - Docker isolation   |
+| - Security validation  |       | - Docker isolation      |       | - Resource cleanup   |
+| - Timeout handling     |       |                         |       |                      |
++------------------------+       +-------------------------+       +----------------------+
+        ^                                                                   ^
+        |                                                                   |
+        v                                                                   v
++------------------------+                                       +---------------------+
+|                        |                                       |                     |
+| Enhanced RecoveryManager|                                      | ResourceLimiter     |
+| - Multiple strategies  |                                       | - Memory limits     |
+| - Tiered rollback      |                                       | - Concurrent        |
+| - Verification         |                                       |   execution         |
++------------------------+                                       +---------------------+
 ```
 
--   **ScriptExecutor**: Executes scripts with platform-specific methods
--   **IsolationMethods**: Isolation options for script execution
--   **ResourceManager**: Manages resources during execution
--   **RecoveryManager**: Handles rollback and recovery operations
+-   **Enhanced ScriptExecutor**: Executes scripts with robust change tracking and security validation
+-   **IsolationMethods**: Improved isolation options for script execution
+-   **ResourceManager**: Better management of resources during execution
+-   **Enhanced RecoveryManager**: Comprehensive recovery with multiple strategies and verification
+
+### 5. Improved Verification Components
+
+```
++------------------------+       +-------------------------+       +----------------------+
+|                        |       |                         |       |                      |
+| VerificationManager    |<----->| Verifier                |<----->| SystemStateChecker   |
+| - Manages verification |       | - Verification engine   |       | - Checks system      |
+| - Verification strategies      | - Result validation     |       |   integrity          |
+| - Post-rollback checks |       |                         |       |                      |
++------------------------+       +-------------------------+       +----------------------+
+        ^                                     ^
+        |                                     |
++-------+--------------------+     +----------+-----------+
+|                            |     |                      |
+| DynamicVerificationBuilder |     | VerificationSteps    |
+| - Generate verification    |     | - Predefined steps   |
+|   steps                    |     | - Custom steps       |
+|                            |     |                      |
++----------------------------+     +----------------------+
+```
+
+-   **VerificationManager**: Manages the verification process with enhanced system state checking
+-   **Verifier**: Performs verification with improved result validation
+-   **SystemStateChecker**: New component to verify system integrity after operations
+-   **DynamicVerificationBuilder**: Generates verification steps based on operations
 
 For details on how data flows between these components, see the [Data Flow](data-flow-readme.md) documentation.

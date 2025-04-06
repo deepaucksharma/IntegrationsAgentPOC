@@ -1,4 +1,4 @@
-# Overview
+# Workflow Agent Integration Framework
 
 ## Documentation Contents
 
@@ -9,34 +9,49 @@ This documentation is structured across several focused README files:
 3.  **[Component Hierarchy](component-hierarchy-readme.md)**: Detailed breakdown of system modules and their responsibilities
 4.  **[Data Flow](data-flow-readme.md)**: Information flow throughout the workflow lifecycle
 5.  **[Developer Setup & Troubleshooting](developer-readme.md)**: Setup instructions, common issues, and debugging tips
+6.  **[Recent Fixes & Improvements](FIXED.md)**: Summary of critical issues addressed in recent updates
 
 ## Agentic Workflow 
 
-The following demonstrates a typical workflow with agents :
+The following demonstrates a typical workflow with agents:
 
-
-
-![Agentic](https://github.com/user-attachments/assets/91c86266-b490-4360-9c92-d6a29b93802e)
+```
+┌──────────────┐          ┌───────────────┐             ┌───────────────┐
+│              │          │               │             │               │
+│ CLI/API      │ ────────►│ Coordinator   │────────────►│ Knowledge     │
+│ Interface    │          │ Agent         │◄───────────┐│ Agent         │
+│              │◄─────────│               │             │               │
+└──────────────┘          └───────┬───────┘             └───────────────┘
+                                  │
+                                  ▼
+                          ┌───────────────┐             ┌───────────────┐
+                          │               │             │               │
+                          │ Script        │────────────►│ Execution     │
+                          │ Builder       │◄───────────┐│ Agent         │
+                          │               │             │               │
+                          └───────────────┘             └───────────────┘
+```
 
 ---
 
-## Dual-Hierarchy System Design
+## Enhanced Security and Reliability Architecture
 
-```
-Configuration Hierarchy                Template Hierarchy
-----------------------                ----------------------
-Global Defaults                       Base Templates
-    ↓                                     ↓
-Integration Type Configs                 Action Templates
-    ↓                                     ↓
-Customer Environment Configs             Integration-Specific Templates
-    ↓                                     ↓
-Deployment Overrides                   Custom Environment Templates
-```
+The system has been redesigned with a focus on security, reliability, and recovery:
 
-- **Configuration** defines paths, isolation, timeouts, and more.
-- **Templates** generate install/remove/verify scripts.
-- **Binding** is achieved via variable substitution (e.g. `${WORKSPACE_ROOT}`).
+### 1. Enhanced Security Architecture
+- **Multi-Layered Script Validation**: Comprehensive validation with static analysis, syntax checking, and security pattern detection
+- **Least Privilege Execution**: Configurable isolation methods with privilege restrictions
+- **Secure Template Handling**: Template validation and sandboxed rendering
+
+### 2. Robust State Management
+- **Immutable State Transitions**: Carefully tracked workflow progression with immutable state changes
+- **Comprehensive Checkpointing**: Sequential checkpoints at every stage to enable recovery
+- **Transparent Change Tracking**: Detailed tracking of all system modifications for reliable rollback
+
+### 3. Advanced Recovery System
+- **Tiered Recovery Strategies**: Multiple fallback mechanisms for maximum resilience
+- **Verification-Based Rollback**: Post-rollback verification ensures system integrity
+- **Transaction-Based Operations**: All operations are transactional with proper audit trails
 
 ---
 
@@ -83,60 +98,105 @@ Search order:
 
 ## Key Code Snippets
 
-### Template Path Resolution
+### Improved Script Security Validation
 
 ```python
-@root_validator(pre=True)
-def resolve_workspace_paths(cls, values: Dict[str, Any]) -> Dict[str, Any]:
-    workspace_root = os.environ.get("WORKSPACE_ROOT", os.getcwd())
-    return { key: value.replace("${WORKSPACE_ROOT}", workspace_root)
-             if isinstance(value, str) and "${WORKSPACE_ROOT}" in value else value
-             for key, value in values.items() }
+def validate_script_security(script_content: str) -> Dict[str, Any]:
+    """
+    Validate script content for potentially dangerous operations using multiple methods.
+    """
+    warnings = []
+    errors = []
+    
+    # Check for dangerous patterns
+    for pattern in DANGEROUS_PATTERNS:
+        if re.search(pattern, script_content, re.IGNORECASE):
+            errors.append(f"Dangerous pattern detected: {pattern}")
+    
+    # Apply static analysis when available
+    if "#!/bin/bash" in script_content or "#!/bin/sh" in script_content:
+        with tempfile.NamedTemporaryFile(suffix=".sh", delete=False) as temp:
+            temp_path = temp.name
+            temp.write(script_content.encode())
+        
+        try:
+            # Run shellcheck to find issues
+            result = subprocess.run(
+                ["shellcheck", "-f", "json", temp_path],
+                capture_output=True, text=True, check=False
+            )
+            
+            if result.returncode == 0:
+                logger.debug("Shellcheck validation passed")
+            else:
+                try:
+                    shellcheck_output = json.loads(result.stdout)
+                    for issue in shellcheck_output:
+                        level = issue.get("level", "").lower()
+                        message = issue.get("message", "")
+                        
+                        if level == "error":
+                            errors.append(f"Shellcheck error: {message}")
+                        else:
+                            warnings.append(f"Shellcheck warning: {message}")
+                except json.JSONDecodeError:
+                    warnings.append("Failed to parse shellcheck output")
+        finally:
+            os.unlink(temp_path)
+    
+    # Determine overall validity
+    valid = len(errors) == 0
+    
+    return {
+        "valid": valid,
+        "warnings": warnings,
+        "errors": errors
+    }
 ```
 
-### Dynamic Script Generation (Linux Example)
-
-```jinja
-#!/bin/bash
-set -e
-trap 'echo "Error on line $LINENO"; exit 1' ERR
-echo "Installing {{ target_name }}"
-# Prerequisite checks: {{ template_data.platform_specific.prerequisites | join(", ") }}
-{% for step in template_data.docs.installation_methods[0].steps %}
-echo "Step {{ loop.index }}: {{ step }}"
-{{ step }}
-{% endfor %}
-echo "Installation complete."
-```
-
-### Scoring Installation Methods
+### Enhanced Change Tracking for Reliable Rollback
 
 ```python
-def _calculate_compatibility_score(self, method: Dict[str, Any], state: Any) -> float:
-    platform_score = 1.0 if state.template_data.get("platform_info", {}).get("system") in method.get("platform_compatibility", []) else 0.5
-    complexity_score = 1.0 / (1 + len(method.get("steps", [])) * 0.1)
-    return platform_score * 5.0 + complexity_score * 3.0  # Simplified scoring
+def _extract_changes(self, output: str) -> List[Change]:
+    """
+    Extract changes from script output with enhanced structured change tracking.
+    """
+    changes = []
+    
+    # Process JSON change blocks for reliable tracking
+    json_change_blocks = re.findall(r"CHANGE_JSON_BEGIN\s*(.*?)\s*CHANGE_JSON_END", output, re.DOTALL)
+    
+    for json_block in json_change_blocks:
+        try:
+            change_data = json.loads(json_block)
+            
+            # Handle both single change and array of changes
+            if isinstance(change_data, list):
+                for item in change_data:
+                    self._process_change_item(item, changes)
+            else:
+                self._process_change_item(change_data, changes)
+                
+        except json.JSONDecodeError:
+            logger.warning(f"Failed to parse JSON change block: {json_block[:100]}")
+    
+    # Fallback to structured change markers if no JSON
+    # ... [additional structured parsing]
+    
+    # If we couldn't parse any changes but have output, try to infer changes
+    if not changes and len(output) > 0:
+        # Look for common installation patterns
+        package_patterns = [
+            r"(?:installed|Installing)\s+(?:package|module)\s+(\S+)",
+            r"(?:apt-get|yum|dnf|pip)\s+install.*?(\S+)"
+        ]
+        
+        # ... [additional inference logic]
+    
+    return changes
 ```
 
 ---
-
-## Summary
-
-- **Dual Hierarchy:** Separate yet interconnected configurations and templates.
-- **Dynamic Resolution:** Variables and environment settings enable flexible template discovery.
-- **Multi-Tenant & Versioning:** Supports customer overrides, namespace isolation, and multiple integration versions.
-- **Environment Adaptation:** Config-controlled execution with isolation, timeouts, and platform-specific branches.
-- **Dynamic Enhancement:** Automated documentation parsing and knowledge injection drive intelligent script generation and self‑improving verification.
-
-This architecture scales to global enterprises by maintaining strict governance, clear inheritance, and flexible override mechanisms across diverse environments.
-
---- 
-
-End of document.
-
-See the [Developer Setup & Troubleshooting](developer-readme.md) guide for more detailed instructions.
-
-![image](https://github.com/user-attachments/assets/add4a13a-f250-4c5a-a1cd-e4f561b285ed)
 
 ## API Key Configuration
 
