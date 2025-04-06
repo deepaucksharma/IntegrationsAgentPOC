@@ -77,6 +77,7 @@ class WorkflowConfiguration(BaseModel):
     docs_cache_dir: Optional[Path] = Field(default=Path("./cache/docs"), description="Documentation cache directory")
     docs_cache_ttl: int = Field(default=86400, description="Documentation cache TTL in seconds", ge=1)
     use_recovery: bool = Field(default=True, description="Use recovery")
+    verify_rollback: bool = Field(default=True, description="Verify rollback")
     error_handling: Dict[str, Any] = Field(
         default_factory=lambda: {
             "continue_on_error": False,

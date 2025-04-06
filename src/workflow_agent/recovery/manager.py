@@ -31,15 +31,16 @@ class RecoveryManager:
     Enhanced recovery manager with robust rollback capabilities and multiple strategies.
     """
     
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config):
         """Initialize with configuration."""
         self.config = config
-        self.isolation_method = config.get("isolation_method", "direct")
-        self.use_recovery = config.get("use_recovery", True)
-        self.max_rollback_attempts = config.get("max_rollback_attempts", 3)
-        self.backup_dir = self._ensure_backup_dir(config.get("backup_dir", "./backup"))
-        self.recovery_timeout = config.get("recovery_timeout", 600)  # 10 minutes
-        self.verify_rollback = config.get("verify_rollback", True)
+        # For Pydantic models, use getattr instead of dict-like .get()
+        self.isolation_method = getattr(config, "isolation_method", "direct")
+        self.use_recovery = getattr(config, "use_recovery", True)
+        self.max_rollback_attempts = getattr(config, "max_rollback_attempts", 3)
+        self.backup_dir = self._ensure_backup_dir(getattr(config, "backup_dir", "./backup"))
+        self.recovery_timeout = getattr(config, "recovery_timeout", 600)  # 10 minutes
+        self.verify_rollback = getattr(config, "verify_rollback", True)
     
     def _ensure_backup_dir(self, backup_dir_path: str) -> Path:
         """Ensure the backup directory exists."""
@@ -240,7 +241,7 @@ class RecoveryManager:
             try:
                 stdout, stderr = await asyncio.wait_for(
                     process.communicate(),
-                    timeout=self.config.get("execution_timeout", 60)  # Shorter timeout for individual changes
+                    timeout=getattr(self.config, "execution_timeout", 60)  # Shorter timeout for individual changes
                 )
             except asyncio.TimeoutError:
                 process.terminate()

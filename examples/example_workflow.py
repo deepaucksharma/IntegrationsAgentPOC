@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 import platform
+from datetime import datetime
 from pathlib import Path
 from workflow_agent.main import WorkflowAgent
 from workflow_agent.core.state import WorkflowState
@@ -61,20 +62,46 @@ async def main():
 
         logger.info("Initializing WorkflowAgent...")
         # Create a WorkflowAgent instance
-        agent = WorkflowAgent(config=config.get("configurable"))
-        await agent.initialize()
+        agent = WorkflowAgent(config=config.configurable if hasattr(config, "configurable") else config)
+        # WorkflowAgent initializes its components in the constructor
         logger.info("WorkflowAgent initialized successfully")
 
-        # Define a sample workflow state
-        logger.info("Creating workflow state...")
+        # Create parameters dictionary
+        params = {
+            "license_key": os.environ.get("NEW_RELIC_LICENSE_KEY", "YOUR_LICENSE_KEY"),
+            "host": "localhost",
+            "port": "8080",
+            "install_dir": r"C:\Program Files\New Relic",
+            "config_path": r"C:\ProgramData\New Relic",
+            "log_path": r"C:\ProgramData\New Relic\logs"
+        }
+        
+        # Get system context to check if we're on Windows
+        sys_context = get_system_context()
+        
+        # Create context for template - all top-level keys
+        template_context = {
+            "action": "install",
+            "target_name": "infrastructure-agent",
+            "integration_type": "infra_agent",
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "parameters": params  # Include parameters as a nested dictionary
+        }
+        
+        # Create the state object
         state = WorkflowState(
             action="install",
-            target_name="example-integration",
-            integration_type="newrelic-infra-agent",
-            parameters={"license_key": os.environ.get("NEW_RELIC_LICENSE_KEY", "YOUR_LICENSE_KEY")},
-            system_context=get_system_context(),
-            template_data={}
+            target_name="infrastructure-agent",  # A supported target
+            integration_type="infra_agent",      # Match the plugin name 
+            parameters=params,
+            system_context=sys_context,
+            template_data=template_context
         )
+        
+        # Then set the template_key attribute directly based on platform
+        if sys_context.get('platform', {}).get('system') == 'windows':
+            state = state.evolve(template_key="install/infra_agent.ps1")
+        
         logger.info(f"Created workflow state: {state}")
 
         # Run the workflow
@@ -88,10 +115,13 @@ async def main():
         print(result)
         print("-" * 50)
 
-        # Close the agent
+        # Close the agent (we're adding a check for the close method)
         logger.info("Closing agent...")
-        await agent.close()
-        logger.info("Agent closed successfully")
+        if hasattr(agent, 'close') and callable(getattr(agent, 'close')):
+            await agent.close()
+            logger.info("Agent closed successfully")
+        else:
+            logger.info("No close method available on agent")
 
     except Exception as e:
         logger.error(f"Error during workflow execution: {str(e)}", exc_info=True)
