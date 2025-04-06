@@ -1,12 +1,12 @@
 """
-Execution components for workflow agent.
+Execution module for running scripts with isolation and security.
 """
-from .executor import ScriptExecutor, ResourceLimiter
-from .isolation import run_script_direct, run_script_docker
+from .executor import ScriptExecutor
+from .isolation import IsolationFactory, DockerIsolation, DirectIsolation
 
 __all__ = [
-    "ScriptExecutor", 
-    "ResourceLimiter",
-    "run_script_direct",
-    "run_script_docker"
+    'ScriptExecutor',
+    'IsolationFactory',
+    'DockerIsolation',
+    'DirectIsolation'
 ]

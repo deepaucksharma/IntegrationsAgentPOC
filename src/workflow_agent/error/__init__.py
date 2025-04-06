@@ -1,20 +1,36 @@
 """
-Error handling for workflow agent.
+Error handling utilities and exceptions.
 """
 from .exceptions import (
     WorkflowError,
     ConfigurationError,
+    ValidationError,
     InitializationError,
     ExecutionError,
     StateError,
-    ScriptError
+    RecoveryError,
+    TemplateError,
+    StorageError,
+    SecurityError,
+    IntegrationError,
+    DocumentationFetchError,
+    VerificationError,
+    LLMError
 )
 
 __all__ = [
-    "WorkflowError",
-    "ConfigurationError",
-    "InitializationError",
-    "ExecutionError",
-    "StateError",
-    "ScriptError"
+    'WorkflowError',
+    'ConfigurationError',
+    'ValidationError',
+    'InitializationError',
+    'ExecutionError',
+    'StateError',
+    'RecoveryError',
+    'TemplateError',
+    'StorageError',
+    'SecurityError',
+    'IntegrationError',
+    'DocumentationFetchError',
+    'VerificationError',
+    'LLMError'
 ]

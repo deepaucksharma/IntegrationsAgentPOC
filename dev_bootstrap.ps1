@@ -159,7 +159,7 @@ plugin_dirs:
 
 # LLM Configuration
 llm_provider: "gemini"
-gemini_api_key: "AIzaSyAyGoywP_4dr5fWFi8LjR6ZV6gyk7HuAME"
+# API keys must be set through environment variables
 
 # Execution Configuration
 use_recovery: true
@@ -302,11 +302,15 @@ try {
     # Initialize test results tracking
     $testResults = @{}
 
-    # Test Suites
-    Write-Host "`nRunning test suites..." -ForegroundColor Green
-
     # Set Python path for all tests
     $env:PYTHONPATH = (Resolve-Path ".\src").Path
+    
+    # Set test API keys (just for testing - will be validated but not used)
+    $env:OPENAI_API_KEY = "test_key_openai"
+    $env:GEMINI_API_KEY = "test_key_gemini"
+
+    # Run test suites with pytest
+    Write-Host "`nRunning test suites..." -ForegroundColor Green
 
     # 1. Basic Functionality Tests
     $testResults["Basic Help"] = Invoke-TestSuite "Basic Help Command" {
@@ -326,14 +330,9 @@ try {
         python -m workflow_agent remove infra_agent --host $TEST_HOST
     }
 
-    # 3. LLM Workflow Tests
-    $testResults["LLM Workflows"] = Invoke-TestSuite "LLM Workflow Tests" {
-        python test_llm_workflows.py
-    }
-
-    # 4. Example Workflow
-    $testResults["Example Workflow"] = Invoke-TestSuite "Example Workflow" {
-        python test_workflow.py
+    # 3. Run pytest tests
+    $testResults["Unit Tests"] = Invoke-TestSuite "Unit Tests" {
+        pytest
     }
 
     # Final status report
@@ -379,4 +378,4 @@ catch {
     Write-Host "`nCleaning up mock templates after error..." -ForegroundColor Yellow
     Remove-MockTemplates
     throw
-} 
+}

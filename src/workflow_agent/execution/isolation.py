@@ -1,192 +1,350 @@
 """
-Isolation methods for script execution.
+Isolation strategies for script execution.
 """
-import os
-import uuid
-import tempfile
-import shutil
 import logging
+import os
+import tempfile
 import asyncio
-from typing import Tuple, Optional
+import platform
+from abc import ABC, abstractmethod
+from pathlib import Path
+from typing import Dict, Any, Optional, List, Union
+
+from ..error.exceptions import ExecutionError
+from ..core.state import OutputData
+from ..config.configuration import WorkflowConfiguration
 
 logger = logging.getLogger(__name__)
 
-async def run_script_direct(
-    script_path: str,
-    timeout_ms: int
-) -> Tuple[bool, str, str, int, Optional[str]]:
-    """Execute the script directly on the host system."""
-    process = None
-    timeout_sec = timeout_ms / 1000
-    try:
-        process = await asyncio.create_subprocess_exec(
-            script_path,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
-        try:
-            stdout, stderr = await asyncio.wait_for(
-                process.communicate(),
-                timeout=timeout_sec
-            )
-            stdout_str = stdout.decode('utf-8')
-            stderr_str = stderr.decode('utf-8')
-            success = process.returncode == 0
-            error_message = None if success else f"Script execution failed with return code {process.returncode}"
-            return success, stdout_str, stderr_str, process.returncode, error_message
-        except asyncio.TimeoutError:
-            if process:
-                process.kill()
-                try:
-                    stdout, stderr = await process.communicate()
-                    stdout_str = stdout.decode('utf-8')
-                    stderr_str = stderr.decode('utf-8')
-                except:
-                    stdout_str, stderr_str = "", ""
-            else:
-                stdout_str, stderr_str = "", ""
-            stderr_str = f"Script execution timed out after {timeout_sec}s\n" + stderr_str
-            return False, stdout_str, stderr_str, 124, stderr_str
-    except Exception as err:
-        if process:
-            process.kill()
-            try:
-                stdout, stderr = await process.communicate()
-                stdout_str = stdout.decode('utf-8')
-                stderr_str = stderr.decode('utf-8')
-            except:
-                stdout_str, stderr_str = "", str(err)
-        else:
-            stdout_str, stderr_str = "", str(err)
-        return False, stdout_str, stderr_str, 1, f"Script execution failed: {stderr_str}"
+class IsolationStrategy(ABC):
+    """Base class for isolation strategies."""
+    
+    def __init__(self, config: WorkflowConfiguration):
+        """Initialize with configuration."""
+        self.config = config
+        
+    @abstractmethod
+    async def execute(
+        self, 
+        script_content: str,
+        parameters: Dict[str, Any],
+        working_dir: Optional[Path] = None
+    ) -> OutputData:
+        """
+        Execute a script with isolation.
+        
+        Args:
+            script_content: Content of the script to execute
+            parameters: Parameters to pass to the script
+            working_dir: Working directory for execution
+            
+        Returns:
+            Output data with stdout, stderr, exit code
+        """
+        pass
+        
+    @abstractmethod
+    def get_name(self) -> str:
+        """Get the name of the isolation strategy."""
+        pass
 
-async def run_script_docker(
-    script_path: str,
-    timeout_ms: int,
-    least_privilege: bool = True
-) -> Tuple[bool, str, str, int, Optional[str]]:
-    """Execute the script in an isolated Docker container."""
-    # Check Docker availability
-    try:
-        process = await asyncio.create_subprocess_exec(
-            "docker", "--version",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
-        try:
-            await asyncio.wait_for(process.wait(), timeout=5.0)
-            if process.returncode != 0:
-                logger.warning("Docker not available, falling back to direct execution")
-                return await run_script_direct(script_path, timeout_ms)
-        except asyncio.TimeoutError:
-            process.kill()
-            logger.warning("Docker check timed out, falling back to direct execution")
-            return await run_script_direct(script_path, timeout_ms)
-    except Exception as e:
-        logger.warning(f"Docker not available: {e}, falling back to direct execution")
-        return await run_script_direct(script_path, timeout_ms)
+class DirectIsolation(IsolationStrategy):
+    """Execute scripts directly on the host."""
     
-    temp_dir = tempfile.mkdtemp(prefix='workflow-docker-')
-    container_script_path = os.path.join(temp_dir, os.path.basename(script_path))
-    shutil.copy2(script_path, container_script_path)
-    container_name = f"workflow-{uuid.uuid4().hex[:8]}"
-    docker_image = "alpine:latest"
-    docker_cmd = ["docker", "run", "--rm", "--name", container_name]
-    
-    if least_privilege:
-        docker_cmd.extend([
-            "--read-only",
-            "--security-opt=no-new-privileges",
-            "--memory=512m",
-            "--cpus=1",
-            "--network=none"
-        ])
-    docker_cmd.extend(["-v", f"{container_script_path}:/script.sh"])
-    docker_cmd.extend([docker_image, "sh", "-c", "chmod +x /script.sh && /script.sh"])
-    
-    process = None
-    timeout_sec = timeout_ms / 1000
-    try:
-        logger.info(f"Running script in Docker container: {container_name}")
-        process = await asyncio.create_subprocess_exec(
-            *docker_cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
-        try:
-            stdout, stderr = await asyncio.wait_for(
-                process.communicate(),
-                timeout=timeout_sec
-            )
-            stdout_str = stdout.decode('utf-8')
-            stderr_str = stderr.decode('utf-8')
-            success = process.returncode == 0
-            error_message = None if success else f"Container failed with return code {process.returncode}"
-            return success, stdout_str, stderr_str, process.returncode, error_message
-        except asyncio.TimeoutError:
-            logger.error(f"Container execution timed out after {timeout_sec}s")
-            try:
-                kill_process = await asyncio.create_subprocess_exec(
-                    "docker", "kill", container_name,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE
-                )
-                await kill_process.wait()
-            except:
-                pass
-            if process:
-                process.kill()
-                try:
-                    stdout, stderr = await process.communicate()
-                    stdout_str = stdout.decode('utf-8')
-                    stderr_str = stderr.decode('utf-8')
-                except:
-                    stdout_str, stderr_str = "", ""
-            else:
-                stdout_str, stderr_str = "", ""
-            stderr_str = f"Container execution timed out after {timeout_sec}s\n" + stderr_str
-            return False, stdout_str, stderr_str, 124, stderr_str
-    except Exception as err:
-        logger.exception(f"Error during container execution: {err}")
-        try:
-            kill_process = await asyncio.create_subprocess_exec(
-                "docker", "kill", container_name,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            await kill_process.wait()
-        except:
-            pass
-        if process:
-            process.kill()
-            try:
-                stdout, stderr = await process.communicate()
-                stdout_str = stdout.decode('utf-8')
-                stderr_str = stderr.decode('utf-8')
-            except:
-                stdout_str, stderr_str = "", str(err)
-        else:
-            stdout_str, stderr_str = "", str(err)
-        return False, stdout_str, stderr_str, 1, f"Container execution failed: {stderr_str}"
-    finally:
-        # Ensure container is removed
-        try:
-            container_remove_process = await asyncio.create_subprocess_exec(
-                "docker", "rm", "-f", container_name,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            try:
-                await asyncio.wait_for(container_remove_process.wait(), timeout=5.0)
-            except asyncio.TimeoutError:
-                container_remove_process.kill()
-        except Exception as e:
-            logger.warning(f"Error removing container {container_name}: {e}")
+    def __init__(self, config: WorkflowConfiguration):
+        """Initialize direct isolation."""
+        super().__init__(config)
+        
+    async def execute(
+        self, 
+        script_content: str,
+        parameters: Dict[str, Any],
+        working_dir: Optional[Path] = None
+    ) -> OutputData:
+        """Execute a script directly on the host."""
+        is_windows = platform.system().lower() == 'windows'
+        
+        # Create a temporary script file
+        with tempfile.NamedTemporaryFile(
+            suffix='.ps1' if is_windows else '.sh',
+            delete=False,
+            mode='w+'
+        ) as script_file:
+            script_path = script_file.name
+            script_file.write(script_content)
             
         try:
-            if os.path.exists(container_script_path):
-                os.unlink(container_script_path)
-            if os.path.exists(temp_dir):
-                shutil.rmtree(temp_dir, ignore_errors=True)
-        except Exception as e:
-            logger.error(f"Failed to clean up container script: {e}")
+            # Make the script executable on Unix-like systems
+            if not is_windows:
+                os.chmod(script_path, 0o755)
+                
+            # Execute the script
+            if is_windows:
+                cmd = f'powershell.exe -ExecutionPolicy Bypass -File "{script_path}"'
+            else:
+                cmd = f'bash "{script_path}"'
+                
+            logger.info(f"Executing script with command: {cmd}")
+            
+            # Track execution time
+            import time
+            start_time = time.time()
+            
+            process = await asyncio.create_subprocess_shell(
+                cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=working_dir
+            )
+            
+            try:
+                stdout, stderr = await asyncio.wait_for(
+                    process.communicate(),
+                    timeout=self.config.execution_timeout
+                )
+            except asyncio.TimeoutError:
+                if process.returncode is None:
+                    process.terminate()
+                    return OutputData(
+                        stdout="",
+                        stderr="Script execution timed out",
+                        exit_code=124,
+                        duration=time.time() - start_time
+                    )
+            
+            # Convert stdout and stderr to strings
+            stdout_str = stdout.decode() if stdout else ""
+            stderr_str = stderr.decode() if stderr else ""
+            
+            duration = time.time() - start_time
+            
+            # Parse output for changes
+            changes = self._parse_changes(stdout_str)
+            
+            # Create output data
+            output = OutputData(
+                stdout=stdout_str,
+                stderr=stderr_str,
+                exit_code=process.returncode or 0,
+                duration=duration
+            )
+            
+            # Log result
+            if process.returncode == 0:
+                logger.info(f"Script executed successfully in {duration:.2f}s")
+            else:
+                logger.error(f"Script execution failed with exit code {process.returncode}")
+                if stderr_str:
+                    logger.error(f"Error output: {stderr_str}")
+                    
+            return output
+            
+        finally:
+            # Clean up temporary script file
+            try:
+                os.unlink(script_path)
+            except Exception as e:
+                logger.warning(f"Failed to remove temporary script: {e}")
+    
+    def _parse_changes(self, output: str) -> List[Dict[str, Any]]:
+        """Parse script output for changes."""
+        changes = []
+        
+        # Look for standardized change indicators
+        import re
+        
+        # Package installations
+        for match in re.finditer(r"CHANGE:PACKAGE_INSTALLED:(\S+)", output):
+            package_name = match.group(1)
+            changes.append({
+                "type": "package_installed",
+                "target": package_name,
+                "revertible": True
+            })
+            
+        # File creations
+        for match in re.finditer(r"CHANGE:FILE_CREATED:(\S+)", output):
+            file_path = match.group(1)
+            changes.append({
+                "type": "file_created",
+                "target": file_path,
+                "revertible": True
+            })
+            
+        # Directory creations
+        for match in re.finditer(r"CHANGE:DIRECTORY_CREATED:(\S+)", output):
+            dir_path = match.group(1)
+            changes.append({
+                "type": "directory_created",
+                "target": dir_path,
+                "revertible": True
+            })
+            
+        # Service operations
+        for match in re.finditer(r"CHANGE:SERVICE_(\w+):(\S+)", output):
+            operation = match.group(1).lower()
+            service_name = match.group(2)
+            changes.append({
+                "type": f"service_{operation}",
+                "target": service_name,
+                "revertible": operation in ["started", "enabled"]
+            })
+            
+        return changes
+        
+    def get_name(self) -> str:
+        """Get isolation name."""
+        return "direct"
+
+class DockerIsolation(IsolationStrategy):
+    """Execute scripts in Docker containers."""
+    
+    def __init__(self, config: WorkflowConfiguration):
+        """Initialize Docker isolation."""
+        super().__init__(config)
+        self.image = config.docker_image if hasattr(config, 'docker_image') else "debian:stable-slim"
+        self.memory_limit = "512m"
+        self.cpu_limit = "1.0"
+        
+    async def execute(
+        self, 
+        script_content: str,
+        parameters: Dict[str, Any],
+        working_dir: Optional[Path] = None
+    ) -> OutputData:
+        """Execute a script in a Docker container."""
+        # Check if Docker is available
+        if not await self._is_docker_available():
+            logger.error("Docker is not available. Cannot use Docker isolation.")
+            raise ExecutionError("Docker is not available for script isolation")
+            
+        # Create a temporary directory for the script
+        with tempfile.TemporaryDirectory() as temp_dir:
+            # Write the script to the temporary directory
+            script_path = Path(temp_dir) / "script.sh"
+            with open(script_path, "w") as f:
+                f.write(script_content)
+                
+            # Make the script executable
+            os.chmod(script_path, 0o755)
+            
+            # Create a temporary file for the output
+            output_path = Path(temp_dir) / "output.txt"
+            error_path = Path(temp_dir) / "error.txt"
+            
+            # Build the Docker command
+            container_name = f"workflow-agent-{parameters.get('execution_id', 'unknown')}"
+            
+            docker_cmd = (
+                f"docker run --rm --name {container_name} "
+                f"--memory={self.memory_limit} --cpus={self.cpu_limit} "
+                f"-v {script_path}:/script.sh:ro "
+                f"{self.image} /script.sh"
+            )
+            
+            # Execute the Docker command
+            import time
+            start_time = time.time()
+            
+            try:
+                process = await asyncio.create_subprocess_shell(
+                    docker_cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    cwd=working_dir
+                )
+                
+                try:
+                    stdout, stderr = await asyncio.wait_for(
+                        process.communicate(),
+                        timeout=self.config.execution_timeout
+                    )
+                except asyncio.TimeoutError:
+                    # Kill the container if it's still running
+                    await asyncio.create_subprocess_shell(
+                        f"docker kill {container_name}",
+                        stdout=asyncio.subprocess.DEVNULL,
+                        stderr=asyncio.subprocess.DEVNULL
+                    )
+                    
+                    return OutputData(
+                        stdout="",
+                        stderr="Docker execution timed out",
+                        exit_code=124,
+                        duration=time.time() - start_time
+                    )
+                
+                # Convert stdout and stderr to strings
+                stdout_str = stdout.decode() if stdout else ""
+                stderr_str = stderr.decode() if stderr else ""
+                
+                duration = time.time() - start_time
+                
+                # Create output data
+                output = OutputData(
+                    stdout=stdout_str,
+                    stderr=stderr_str,
+                    exit_code=process.returncode or 0,
+                    duration=duration
+                )
+                
+                # Log result
+                if process.returncode == 0:
+                    logger.info(f"Docker script executed successfully in {duration:.2f}s")
+                else:
+                    logger.error(f"Docker script execution failed with exit code {process.returncode}")
+                    
+                return output
+                
+            except Exception as e:
+                logger.error(f"Error executing Docker command: {e}")
+                return OutputData(
+                    stdout="",
+                    stderr=f"Error executing Docker command: {str(e)}",
+                    exit_code=1,
+                    duration=time.time() - start_time
+                )
+    
+    async def _is_docker_available(self) -> bool:
+        """Check if Docker is available."""
+        try:
+            process = await asyncio.create_subprocess_shell(
+                "docker --version",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            
+            stdout, _ = await process.communicate()
+            return process.returncode == 0 and stdout
+        except Exception:
+            return False
+            
+    def get_name(self) -> str:
+        """Get isolation name."""
+        return "docker"
+
+class IsolationFactory:
+    """Factory for creating isolation strategy instances."""
+    
+    @staticmethod
+    def create(isolation_method: str, config: WorkflowConfiguration) -> IsolationStrategy:
+        """
+        Create an isolation strategy.
+        
+        Args:
+            isolation_method: Type of isolation to use
+            config: Workflow configuration
+            
+        Returns:
+            Isolation strategy instance
+            
+        Raises:
+            ExecutionError: If the isolation method is not supported
+        """
+        if isolation_method.lower() == "docker":
+            return DockerIsolation(config)
+        elif isolation_method.lower() == "direct":
+            return DirectIsolation(config)
+        else:
+            logger.error(f"Unsupported isolation method: {isolation_method}")
+            raise ExecutionError(f"Unsupported isolation method: {isolation_method}")

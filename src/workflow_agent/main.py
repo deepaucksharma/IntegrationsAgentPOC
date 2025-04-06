@@ -16,13 +16,7 @@ from pydantic import ValidationError
 from .core.state import WorkflowState
 from .core.container import DependencyContainer
 from .verification.dynamic import DynamicVerificationBuilder
-from .config import (
-    WorkflowConfiguration,
-    ensure_workflow_config,
-    load_config_file,
-    find_default_config,
-    merge_configs
-)
+from .config.configuration import WorkflowConfiguration, ensure_workflow_config
 from .error.exceptions import (
     WorkflowError,
     ConfigurationError,
@@ -31,7 +25,14 @@ from .error.exceptions import (
     StateError
 )
 from .utils.system import get_system_context
-from .documentation.parser import DocumentationParser
+from .utils.logging import configure_logging, get_workflow_logger
+from .templates.manager import TemplateManager
+from .scripting.generator import ScriptGenerator
+from .execution.executor import ScriptExecutor
+from .verification.manager import VerificationManager
+from .recovery.manager import RecoveryManager
+from .integrations.manager import IntegrationManager
+from .integrations.registry import IntegrationRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -43,153 +44,126 @@ class WorkflowAgent:
         try:
             self.config = ensure_workflow_config(config)
             self._configure_logging()
-            self.container = DependencyContainer(self.config)
-            self._execution_count = 0
+            self._initialize_components()
         except ValidationError as e:
             logger.error(f"Configuration validation failed: {e}")
             raise ConfigurationError(f"Invalid configuration: {e}") from e
 
     def _configure_logging(self) -> None:
-        """Configure logging with rotation and file handling."""
-        log_level = getattr(logging, self.config.log_level, logging.INFO)
-        logging.basicConfig(
-            level=log_level,
-            format='%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s',
-            handlers=[
-                logging.FileHandler("workflow_agent.log"),
-                logging.StreamHandler()
-            ]
-        )
+        """Configure logging with rotation and structured formatting."""
+        configure_logging({
+            "log_level": self.config.log_level,
+            "log_file": self.config.log_file or "workflow_agent.log",
+            "structured_logging": True,
+            "version": getattr(self.config, "version", "1.0.0")
+        })
+        
         logger.info("Logging configured with level: %s", self.config.log_level)
-        logger.debug("Full configuration: %s", self.config.__dict__)
+        logger.debug("Full configuration: %s", self.config.model_dump())
 
-    def _initialize_container(self) -> None:
-        """Initialize container with required components."""
-        from .integrations.manager import IntegrationManager
-        from .integrations.registry import IntegrationRegistry
-        from .recovery.manager import RecoveryManager
-        from .integrations.scripting import ScriptGenerator
-        from .integrations.storage import StorageManager
-        from .integrations.verification import VerificationManager
-        from .integrations.documentation import DocumentationHandler
+    def _initialize_components(self) -> None:
+        """Initialize components with dependency injection."""
+        # Create template manager
+        self.template_manager = TemplateManager(self.config)
         
-        # Register core components
-        self.container.register('integration_registry', IntegrationRegistry())
-        self.container.register('integration_manager', IntegrationManager(self.config))
-        self.container.register('recovery_manager', RecoveryManager(self.config))
+        # Create integration registry and manager
+        self.integration_registry = IntegrationRegistry()
+        self.integration_manager = IntegrationManager(self.config, self.integration_registry)
         
-        # Register integration components
-        self.container.register('script_generator', 
-            ScriptGenerator(self.config.get('template_dir', './templates')))
-        self.container.register('storage_manager', 
-            StorageManager(self.config.get('storage_dir', './storage')))
-        self.container.register('verification_manager', VerificationManager())
-        self.container.register('documentation_handler', DocumentationHandler())
-
-    async def initialize(self) -> None:
-        """Initialize components with connection pooling and retries."""
-        try:
-            logger.info("Starting WorkflowAgent initialization...")
-            await self._initialize_container()
-            await self.container.initialize()
-            
-            logger.info("Validating container initialization...")
-            self.container.validate_initialization()
-            
-            logger.info("WorkflowAgent initialization complete")
-        except InitializationError as e:
-            logger.error("Component initialization failed: %s", e, exc_info=True)
-            logger.info("Cleaning up container due to initialization failure...")
-            await self.container.cleanup()
-            raise
+        # Create script generator and executor
+        self.script_generator = ScriptGenerator(self.config, self.template_manager)
+        self.script_executor = ScriptExecutor(self.config)
+        
+        # Create verification manager
+        self.verification_manager = VerificationManager(self.config, self.template_manager)
+        
+        # Create recovery manager
+        self.recovery_manager = RecoveryManager(self.config)
 
     async def run_workflow(self, state: WorkflowState) -> WorkflowState:
         """Execute workflow with enhanced monitoring and recovery."""
+        workflow_logger = get_workflow_logger(
+            "workflow_agent.workflow",
+            workflow_id=state.transaction_id,
+            execution_id=state.execution_id,
+            integration_type=state.integration_type,
+            action=state.action
+        )
+        
         try:
-            state = self._prepare_execution_state(state)
-            logger.info("Starting workflow execution %d: %s", self._execution_count, state.action)
-
-            # Get integration manager
-            integration_manager = self.container.get('integration_manager')
-            integration = integration_manager.get_integration(state.integration_type)
+            workflow_logger.info("Starting workflow execution: %s", state.action)
+            
+            # Get integration
+            integration = self.integration_manager.get_integration(state.integration_type)
             if not integration:
                 raise WorkflowError(f"Integration {state.integration_type} not found")
-
-            # Execute integration action
+            
+            # Execute based on action
             if state.action == "install":
-                result = await integration.install(state.parameters)
+                # Generate installation script
+                state = await self.script_generator.generate_script(state)
+                if state.has_error:
+                    return state
+                
+                # Execute the script
+                state = await self.script_executor.execute(state)
+                if state.has_error:
+                    return await self._handle_workflow_failure(state)
+                
+                workflow_logger.info("Installation completed successfully")
+                
             elif state.action == "verify":
-                result = await integration.verify(state.parameters)
+                # Run verification
+                state = await self.verification_manager.verify(state)
+                
+                workflow_logger.info("Verification completed with status: %s", state.status)
+                
             elif state.action == "uninstall":
-                result = await integration.uninstall(state.parameters)
+                # Generate uninstallation script
+                state = await self.script_generator.generate_script(state)
+                if state.has_error:
+                    return state
+                
+                # Execute the script
+                state = await self.script_executor.execute(state)
+                if state.has_error:
+                    return await self._handle_workflow_failure(state)
+                
+                workflow_logger.info("Uninstallation completed successfully")
+                
             else:
                 raise WorkflowError(f"Unsupported action: {state.action}")
-
-            # Update state with result
-            if result:
-                if "template_path" in result:
-                    state = state.evolve(
-                        template_key=result["template_path"],
-                        template_data=result.get("template_data", {})
-                    )
-                elif "status" in result:
-                    if result["status"] == "success":
-                        state = state.add_message(result.get("message", "Operation completed successfully"))
-                        if "details" in result:
-                            state = state.evolve(template_data=result["details"])
-                    else:
-                        state = state.set_error(result.get("message", "Operation failed"))
-                else:
-                    state = state.set_error("Invalid result format from integration")
-            else:
-                state = state.set_error("No result returned from integration")
-
-            logger.info("Workflow completed successfully")
-            return state
+            
+            return state.mark_completed()
             
         except WorkflowError as e:
-            logger.error("Workflow error: %s", e)
+            workflow_logger.error("Workflow error: %s", e)
             return await self._handle_workflow_failure(state, e)
         except InitializationError as e:
-            logger.error("Initialization error: %s", e)
+            workflow_logger.error("Initialization error: %s", e)
             return await self._handle_workflow_failure(state, e)
         except Exception as e:
-            logger.error("Unexpected error: %s", e, exc_info=True)
+            workflow_logger.error("Unexpected error: %s", e, exc_info=True)
             return await self._handle_workflow_failure(state, e)
 
-    async def close(self) -> None:
-        """Closes the agent and releases resources."""
-        try:
-            await self.container.cleanup()
-        except Exception as e:
-            logger.error(f"Error during cleanup: {e}")
-            raise
-
-    def _prepare_execution_state(self, state: WorkflowState) -> WorkflowState:
-        """Prepare the execution state."""
-        return state.evolve(
-            execution_id=str(uuid.uuid4()),
-            metrics=self._create_metrics()
-        )
-
-    def _create_metrics(self) -> Any:
-        """Create execution metrics."""
-        from .core.state import ExecutionMetrics
-        return ExecutionMetrics()
-
-    async def _handle_workflow_failure(self, state: WorkflowState, e: Exception) -> WorkflowState:
+    async def _handle_workflow_failure(
+        self, 
+        state: WorkflowState, 
+        error: Optional[Exception] = None
+    ) -> WorkflowState:
         """Handle workflow failure and perform recovery if needed."""
-        error_message = str(e)
+        error_message = str(error) if error else state.error or "Unknown error"
         logger.error("Workflow failed: %s", error_message)
         
-        # Add error to state
-        state = state.set_error(error_message)
+        # Add error to state if not already set
+        if not state.error:
+            state = state.set_error(error_message)
         
         # Attempt recovery if needed
         if self.config.use_recovery:
             try:
-                recovery_manager = self.container.get('recovery_manager')
-                state = await recovery_manager.recover(state)
+                logger.info("Attempting recovery")
+                state = await self.recovery_manager.recover(state)
             except Exception as recovery_error:
                 logger.error("Recovery failed: %s", recovery_error)
                 state = state.add_warning(f"Recovery failed: {recovery_error}")
@@ -223,11 +197,7 @@ def install(
         async def run():
             # Initialize and run workflow
             agent = WorkflowAgent()
-            await agent.initialize()
-            try:
-                return await agent.run_workflow(state)
-            finally:
-                await agent.close()
+            return await agent.run_workflow(state)
                 
         result = asyncio.run(run())
         if result.has_error:
@@ -258,11 +228,7 @@ def verify(
         async def run():
             # Initialize and run workflow
             agent = WorkflowAgent()
-            await agent.initialize()
-            try:
-                return await agent.run_workflow(state)
-            finally:
-                await agent.close()
+            return await agent.run_workflow(state)
                 
         result = asyncio.run(run())
         if result.has_error:
@@ -293,11 +259,7 @@ def remove(
         async def run():
             # Initialize and run workflow
             agent = WorkflowAgent()
-            await agent.initialize()
-            try:
-                return await agent.run_workflow(state)
-            finally:
-                await agent.close()
+            return await agent.run_workflow(state)
                 
         result = asyncio.run(run())
         if result.has_error:

@@ -14,7 +14,7 @@ from ..error.exceptions import ConfigurationError
 logger = logging.getLogger(__name__)
 
 # Patterns that might indicate dangerous operations
-dangerous_patterns = [
+DANGEROUS_PATTERNS = [
     r"rm\s+-rf\s+/",
     r"rm\s+-rf\s+~",
     r"chmod\s+-R\s+777",
@@ -35,7 +35,7 @@ class WorkflowConfiguration(BaseModel):
     
     # Script generation settings
     script_generator: str = "basic"  # basic, llm, enhanced
-    template_dir: Optional[str] = None
+    template_dir: Path = Path("./templates")
     
     # LLM settings
     llm_provider: str = "openai"  # openai, gemini
@@ -48,8 +48,8 @@ class WorkflowConfiguration(BaseModel):
     timeout: float = 300.0
     
     # Storage settings
-    storage_dir: str = "generated_scripts"
-    knowledge_dir: str = "generated_knowledge"
+    storage_dir: Path = Path("./storage")
+    knowledge_dir: Path = Path("./knowledge")
     
     user_id: str = Field(default="test_user", description="User identifier")
     custom_template_dir: Optional[Path] = Field(default=None, description="Custom template directory")
@@ -64,7 +64,7 @@ class WorkflowConfiguration(BaseModel):
     plugin_dirs: List[Path] = Field(default_factory=lambda: [Path("./plugins")], description="Plugin directories")
     max_concurrent_tasks: int = Field(default=5, description="Maximum concurrent tasks", ge=1, le=100)
     least_privilege_execution: bool = Field(default=True, description="Use least privilege execution")
-    docs_cache_dir: Optional[Path] = Field(default="./cache/docs", description="Documentation cache directory")
+    docs_cache_dir: Optional[Path] = Field(default=Path("./cache/docs"), description="Documentation cache directory")
     docs_cache_ttl: int = Field(default=86400, description="Documentation cache TTL in seconds", ge=1)
     use_recovery: bool = Field(default=True, description="Use recovery")
     error_handling: Dict[str, Any] = Field(
@@ -95,7 +95,7 @@ class WorkflowConfiguration(BaseModel):
             raise ValueError(f"Invalid log level '{value}'. Must be one of: {valid_levels}")
         return value_upper
 
-    @field_validator("template_dir", "custom_template_dir", "docs_cache_dir")
+    @field_validator("template_dir", "custom_template_dir", "docs_cache_dir", "storage_dir", "knowledge_dir")
     @classmethod
     def convert_single_path(cls, value: Any) -> Optional[Path]:
         """Convert single path strings to Path objects."""
@@ -119,7 +119,7 @@ class WorkflowConfiguration(BaseModel):
     @classmethod
     def validate_llm_provider(cls, value: str) -> str:
         """Validate LLM provider."""
-        valid_providers = {"openai", "gemini"}
+        valid_providers = {"openai", "gemini", "none"}
         if value.lower() not in valid_providers:
             raise ValueError(f"Invalid LLM provider '{value}'. Must be one of: {valid_providers}")
         return value.lower()
@@ -164,24 +164,101 @@ class WorkflowConfiguration(BaseModel):
                 logger.warning("No Gemini API key found in config or environment")
         
         return values
+        
+    @model_validator(mode="after")
+    def validate_paths_exist(self) -> 'WorkflowConfiguration':
+        """Validate that specified paths exist and are accessible."""
+        paths_to_check = {
+            "template_dir": self.template_dir,
+            "storage_dir": self.storage_dir,
+            "knowledge_dir": self.knowledge_dir,
+        }
+        
+        if self.custom_template_dir:
+            paths_to_check["custom_template_dir"] = self.custom_template_dir
+            
+        if self.docs_cache_dir:
+            paths_to_check["docs_cache_dir"] = self.docs_cache_dir
+        
+        for path_name, path in paths_to_check.items():
+            if path is not None:
+                try:
+                    if not path.exists():
+                        path.mkdir(parents=True, exist_ok=True)
+                        logger.info(f"Created directory for {path_name}: {path}")
+                except Exception as e:
+                    logger.warning(f"Failed to create {path_name} directory: {e}")
+                
+        return self
     
+    @model_validator(mode="after")
+    def validate_security_settings(self) -> 'WorkflowConfiguration':
+        """Validate security-related configuration settings."""
+        if self.skip_verification and not self.least_privilege_execution:
+            logger.warning("Security risk: Skip verification enabled without least privilege execution")
+            
+        if self.isolation_method == "none" and self.use_isolation:
+            logger.warning("Conflicting settings: isolation_method is 'none' but use_isolation is True")
+            
+        if self.execution_timeout > 3600:
+            logger.warning("Security risk: Long execution timeout may lead to resource exhaustion")
+            
+        return self
+
     class Config:
         """Pydantic configuration."""
-        extra = "allow"
+        extra = "allow"  # Allow extra fields
         validate_assignment = True  # Validate when attributes are assigned
         arbitrary_types_allowed = True  # Allow arbitrary types (like Path)
 
-def ensure_workflow_config(config: Dict[str, Any]) -> WorkflowConfiguration:
+
+def ensure_workflow_config(config: Optional[Dict[str, Any]] = None) -> WorkflowConfiguration:
     """Ensure a valid workflow configuration."""
     if isinstance(config, WorkflowConfiguration):
         return config
-    return WorkflowConfiguration(**config)
+        
+    # Start with empty config if none provided
+    if config is None:
+        config = {}
+        
+    # Try to load from default locations
+    default_config = find_default_config() or {}
+    
+    # Merge with default config (default config has lower precedence)
+    merged_config = {**default_config, **config}
+    
+    # Create and validate configuration
+    try:
+        return WorkflowConfiguration(**merged_config)
+    except Exception as e:
+        raise ConfigurationError(f"Invalid configuration: {str(e)}")
 
-def merge_configs(base: WorkflowConfiguration, override: Dict[str, Any]) -> WorkflowConfiguration:
-    """Merge two configurations."""
-    merged = base.dict()
-    merged.update(override)
-    return WorkflowConfiguration(**merged)
+
+def find_default_config() -> Optional[Dict[str, Any]]:
+    """
+    Find and load the default configuration file from standard locations.
+    
+    Returns:
+        Configuration dictionary or None if no config file found
+    """
+    search_paths = [
+        Path.cwd() / "workflow_config.yaml",
+        Path.cwd() / "workflow_config.yml",
+        Path.cwd() / "workflow_config.json",
+        Path.home() / ".workflow_agent" / "config.yaml",
+        Path.home() / ".workflow_agent" / "config.json",
+    ]
+    
+    for path in search_paths:
+        try:
+            if path.exists():
+                return load_config_file(str(path))
+        except Exception as e:
+            logger.warning(f"Error loading config from {path}: {e}")
+    
+    logger.info("No configuration file found, using defaults")
+    return None
+
 
 def load_config_file(file_path: str) -> Dict[str, Any]:
     """
@@ -221,30 +298,17 @@ def load_config_file(file_path: str) -> Dict[str, Any]:
     except Exception as e:
         raise ConfigurationError(f"Error reading config file {file_path}: {str(e)}")
 
-def find_default_config() -> Optional[Dict[str, Any]]:
-    """
-    Find and load the default configuration file from standard locations.
-    
-    Returns:
-        Configuration dictionary or None if no config file found
-    """
-    search_paths = [
-        Path.cwd() / "workflow_config.yaml",
-        Path.cwd() / "workflow_config.yml",
-        Path.cwd() / "workflow_config.json",
-        Path.home() / ".workflow_agent" / "config.yaml",
-        Path.home() / ".workflow_agent" / "config.json",
-    ]
-    
-    for path in search_paths:
-        try:
-            if path.exists():
-                return load_config_file(str(path))
-        except Exception as e:
-            logger.warning(f"Error loading config from {path}: {e}")
-    
-    logger.info("No configuration file found, using defaults")
-    return None
+
+def merge_configs(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
+    """Merge two configuration dictionaries."""
+    result = base.copy()
+    for key, value in override.items():
+        if isinstance(value, dict) and key in result and isinstance(result[key], dict):
+            result[key] = merge_configs(result[key], value)
+        else:
+            result[key] = value
+    return result
+
 
 def validate_script_security(script_content: str) -> Dict[str, Any]:
     """
@@ -259,7 +323,7 @@ def validate_script_security(script_content: str) -> Dict[str, Any]:
     warnings = []
     
     # Check for dangerous patterns
-    for pattern in dangerous_patterns:
+    for pattern in DANGEROUS_PATTERNS:
         if re.search(pattern, script_content, re.IGNORECASE):
             warnings.append(f"Potentially dangerous pattern detected: {pattern}")
     

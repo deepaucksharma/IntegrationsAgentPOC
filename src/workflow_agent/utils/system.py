@@ -1,87 +1,138 @@
+"""
+System utilities for gathering information about the environment.
+"""
 import os
 import platform
 import socket
-import logging
-import psutil
-import shutil
-import asyncio
-from typing import Dict, Any, Optional, List
-
-logger = logging.getLogger(__name__)
+import sys
+import uuid
+import json
+from typing import Dict, Any
 
 def get_system_context() -> Dict[str, Any]:
-    """Get system context information."""
-    try:
-        system = platform.system().lower()
-        context = {
-            "platform": {
-                "system": system,
-                "version": platform.version(),
-                "machine": platform.machine(),
-                "processor": platform.processor()
-            },
-            "environment": {
-                "python_version": platform.python_version(),
-                "path": os.environ.get("PATH", ""),
-                "home": os.environ.get("HOME", os.environ.get("USERPROFILE", ""))
-            }
-        }
-
-        # Add system-specific information
-        if system == "windows":
-            context["platform"].update({
-                "distribution": "windows",
-                "release": platform.release(),
-                "edition": platform.win32_edition() if hasattr(platform, "win32_edition") else ""
-            })
-        elif system == "linux":
-            # Try to get Linux distribution info
+    """
+    Get information about the system environment.
+    
+    Returns:
+        Dictionary of system information
+    """
+    # Basic system info
+    info = {
+        "os": platform.system(),
+        "hostname": socket.gethostname(),
+        "platform": platform.platform(),
+        "python_version": platform.python_version(),
+        "is_windows": platform.system().lower() == "windows",
+    }
+    
+    # Add OS-specific information
+    if info["is_windows"]:
+        try:
+            import wmi
+            c = wmi.WMI()
+            
+            # Windows version info
+            os_info = c.Win32_OperatingSystem()[0]
+            info["os_version"] = os_info.Version
+            info["os_name"] = os_info.Caption
+            
+            # Processor info
+            processor_info = c.Win32_Processor()[0]
+            info["processor"] = processor_info.Name
+            info["processor_cores"] = processor_info.NumberOfCores
+            
+        except ImportError:
+            # WMI not available, use platform module
+            info["os_version"] = platform.version()
+            info["os_name"] = platform.win32_ver()[0]
+    else:
+        # Linux/Unix/Mac information
+        if platform.system().lower() == "linux":
+            # Try to get distribution info
             try:
                 import distro
-                context["platform"].update({
-                    "distribution": distro.id(),
-                    "distribution_version": distro.version(),
-                    "codename": distro.codename()
-                })
+                info["os_name"] = distro.name(pretty=True)
+                info["os_version"] = distro.version()
+                info["os_codename"] = distro.codename()
             except ImportError:
-                # Fallback to basic Linux info
-                context["platform"].update({
-                    "distribution": "unknown",
-                    "distribution_version": "",
-                    "codename": ""
-                })
-
-        return context
-    except Exception as e:
-        # Return basic info on error
-        return {
-            "platform": {
-                "system": platform.system().lower(),
-                "version": platform.version()
-            }
-        }
-
-async def execute_command(command: List[str], timeout: Optional[int] = None, capture_output: bool = True) -> Dict[str, Any]:
-    """
-    Execute a shell command asynchronously with optional timeout and output capture.
-    """
+                # Fall back to platform
+                info["os_name"] = platform.system()
+                info["os_version"] = platform.release()
+        else:
+            # macOS or other Unix
+            info["os_name"] = platform.system()
+            info["os_version"] = platform.release()
+    
+    # Get available package managers
+    info["package_managers"] = detect_package_managers()
+    
+    # Get networking info
     try:
-        proc = await asyncio.create_subprocess_exec(
-            *command,
-            stdout=asyncio.subprocess.PIPE if capture_output else None,
-            stderr=asyncio.subprocess.PIPE if capture_output else None
-        )
-        try:
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-            return {
-                "success": proc.returncode == 0,
-                "return_code": proc.returncode,
-                "stdout": stdout.decode("utf-8") if stdout else "",
-                "stderr": stderr.decode("utf-8") if stderr else "",
-                "command": " ".join(command)
-            }
-        except asyncio.TimeoutError:
-            proc.kill()
-            return {"success": False, "return_code": None, "command": " ".join(command), "error": f"Command timeout after {timeout}s"}
-    except Exception as e:
-        return {"success": False, "return_code": None, "command": " ".join(command), "error": str(e)}
+        info["ip_address"] = socket.gethostbyname(socket.gethostname())
+    except Exception:
+        info["ip_address"] = "127.0.0.1"
+    
+    return info
+
+def detect_package_managers() -> Dict[str, bool]:
+    """
+    Detect available package managers on the system.
+    
+    Returns:
+        Dictionary mapping package manager names to availability
+    """
+    package_managers = {
+        "pip": False,
+        "npm": False,
+        "apt": False,
+        "yum": False,
+        "dnf": False,
+        "pacman": False,
+        "brew": False,
+        "choco": False,
+        "winget": False,
+    }
+    
+    # Check if we're on Windows
+    is_windows = platform.system().lower() == "windows"
+    
+    # Always check pip since we're running Python
+    try:
+        import subprocess
+        subprocess.check_output([sys.executable, "-m", "pip", "--version"])
+        package_managers["pip"] = True
+    except Exception:
+        pass
+    
+    if is_windows:
+        # Check Windows package managers
+        for cmd in ["choco", "winget"]:
+            try:
+                subprocess.check_output(["where", cmd], stderr=subprocess.DEVNULL)
+                package_managers[cmd] = True
+            except Exception:
+                pass
+    else:
+        # Check Unix package managers
+        for cmd in ["npm", "apt", "apt-get", "yum", "dnf", "pacman", "brew"]:
+            try:
+                subprocess.check_output(["which", cmd], stderr=subprocess.DEVNULL)
+                
+                # Map apt-get to apt
+                if cmd == "apt-get":
+                    package_managers["apt"] = True
+                else:
+                    package_managers[cmd] = True
+            except Exception:
+                pass
+    
+    return package_managers
+
+def generate_execution_id() -> str:
+    """
+    Generate a unique execution ID.
+    
+    Returns:
+        Unique execution ID
+    """
+    return str(uuid.uuid4())

@@ -7,6 +7,7 @@ from copy import deepcopy
 from datetime import datetime
 from uuid import UUID, uuid4
 import logging
+from enum import Enum
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +45,14 @@ class OutputData(BaseModel):
 
     class Config:
         frozen = True
+        
+class WorkflowStatus(str, Enum):
+    """Status of a workflow execution."""
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    REVERTED = "reverted"
 
 class WorkflowState(BaseModel):
     """Represents the immutable state of a workflow execution."""
@@ -56,7 +65,7 @@ class WorkflowState(BaseModel):
     parameters: Dict[str, Any] = Field(default_factory=dict)
     template_data: Dict[str, Any] = Field(default_factory=dict)
     system_context: Dict[str, Any] = Field(default_factory=dict)
-    changes: List[Dict[str, Any]] = Field(default_factory=list)
+    changes: List[Change] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)
     messages: List[str] = Field(default_factory=list)
     
@@ -69,49 +78,55 @@ class WorkflowState(BaseModel):
     error: Optional[str] = None
     metrics: ExecutionMetrics = Field(default_factory=ExecutionMetrics)
     output: Optional[OutputData] = None
+    status: WorkflowStatus = WorkflowStatus.PENDING
     
     # State tracking
     state_id: UUID = Field(default_factory=uuid4)
     parent_state_id: Optional[UUID] = None
     created_at: datetime = Field(default_factory=datetime.now)
-    modified_fields: Set[str] = Field(default_factory=set)
 
     class Config:
         frozen = True
+        
+    @property
+    def has_error(self) -> bool:
+        """Check if the state has an error."""
+        return self.error is not None
 
     def evolve(self, **changes) -> 'WorkflowState':
         """Create a new state with the specified changes."""
         # Create a copy of the current state's data
-        data = self.model_dump(exclude={'modified_fields', 'state_id', 'parent_state_id', 'created_at'})
+        data = self.model_dump()
+        
+        # Remove fields we want to recalculate
+        for field in ['state_id', 'parent_state_id', 'created_at']:
+            if field in data:
+                del data[field]
         
         # Update with new changes
         data.update(changes)
         
-        # Track modified fields
-        modified = set(changes.keys())
-        
-        # Create new state
+        # Create new state with current state as parent
         return WorkflowState(
             **data,
-            parent_state_id=self.state_id,
-            modified_fields=modified
+            parent_state_id=self.state_id
         )
 
     def add_change(self, change: Change) -> 'WorkflowState':
         """Add a change to the state."""
-        return self.evolve(changes=self.changes + [change])
+        return self.evolve(changes=list(self.changes) + [change])
 
     def add_warning(self, warning: str) -> 'WorkflowState':
         """Add a warning to the state."""
-        return self.evolve(warnings=self.warnings + [warning])
+        return self.evolve(warnings=list(self.warnings) + [warning])
 
     def add_message(self, message: str) -> 'WorkflowState':
         """Add a message to the state."""
-        return self.evolve(messages=self.messages + [message])
+        return self.evolve(messages=list(self.messages) + [message])
 
     def set_error(self, error: str) -> 'WorkflowState':
         """Set an error in the state."""
-        return self.evolve(error=error)
+        return self.evolve(error=error, status=WorkflowStatus.FAILED)
 
     def set_output(self, output: OutputData) -> 'WorkflowState':
         """Set execution output in the state."""
@@ -124,63 +139,33 @@ class WorkflowState(BaseModel):
     def set_script(self, script: str) -> 'WorkflowState':
         """Set the script in the state."""
         return self.evolve(script=script)
+        
+    def mark_running(self) -> 'WorkflowState':
+        """Mark the state as running."""
+        return self.evolve(status=WorkflowStatus.RUNNING)
+        
+    def mark_completed(self) -> 'WorkflowState':
+        """Mark the state as completed."""
+        return self.evolve(status=WorkflowStatus.COMPLETED)
+        
+    def mark_reverted(self) -> 'WorkflowState':
+        """Mark the state as reverted."""
+        return self.evolve(status=WorkflowStatus.REVERTED)
 
-    @field_validator('changes', 'warnings', 'messages', mode='before')
+    @field_validator('changes', mode='before')
     @classmethod
-    def ensure_immutable_lists(cls, v):
-        """Ensure lists are immutable."""
-        return tuple(v)
-
-    @field_validator('parameters', 'template_data', 'system_context', mode='before')
-    @classmethod
-    def ensure_immutable_dicts(cls, v):
-        """Ensure dictionaries are immutable by creating deep copies."""
-        return deepcopy(v)
-
-    def get_change_history(self) -> List[Dict[str, Any]]:
-        """Get the history of changes made to this state."""
-        history = []
-        current = self
-        while current:
-            if current.modified_fields:
-                history.append({
-                    'state_id': current.state_id,
-                    'modified_fields': current.modified_fields,
-                    'timestamp': current.created_at
-                })
-            current = self._get_parent_state(current.parent_state_id)
-        return history
-
-    def _get_parent_state(self, parent_id: Optional[UUID]) -> Optional['WorkflowState']:
-        """Get parent state - to be implemented by state management system."""
-        return None  # Placeholder - actual implementation would retrieve from state store
+    def ensure_change_objects(cls, v):
+        """Ensure changes are proper Change objects."""
+        if isinstance(v, list):
+            result = []
+            for item in v:
+                if isinstance(item, dict):
+                    result.append(Change(**item))
+                else:
+                    result.append(item)
+            return result
+        return v
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert state to dictionary."""
         return self.model_dump()
-
-    def update(self, data: Dict[str, Any]) -> None:
-        """Update state with new data."""
-        for key, value in data.items():
-            if hasattr(self, key):
-                setattr(self, key, value)
-                self.modified_fields.add(key)
-
-    def merge(self, other: 'WorkflowState') -> None:
-        """Merge another state into this one."""
-        data = other.model_dump()
-        self.update(data)
-
-    def clone(self) -> 'WorkflowState':
-        """Create a copy of this state."""
-        data = self.model_dump()
-        data['parent_state_id'] = self.state_id
-        data['state_id'] = uuid4()
-        data['created_at'] = datetime.now()
-        data['modified_fields'] = set()
-        return WorkflowState(**data)
-
-    def get_modified_data(self) -> Dict[str, Any]:
-        """Get only modified fields."""
-        data = self.model_dump()
-        return {k: v for k, v in data.items() if k in self.modified_fields}

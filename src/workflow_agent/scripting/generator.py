@@ -1,186 +1,180 @@
 """
-Script generation system with template-based and LLM-driven capabilities.
+Script generation for integration actions.
 """
 import logging
 import os
-import json
-from typing import Dict, Any, Optional
-from jinja2 import Environment, FileSystemLoader, ChoiceLoader, PackageLoader, select_autoescape, TemplateNotFound
 from pathlib import Path
+from typing import Dict, Any, Optional, List, Union
+
+from ..error.exceptions import TemplateError
+from ..templates.manager import TemplateManager
+from ..config.configuration import WorkflowConfiguration
 from ..core.state import WorkflowState
-from ..error.exceptions import ScriptError
+from .validator import ScriptValidator
 
 logger = logging.getLogger(__name__)
 
 class ScriptGenerator:
-    """Base class for script generation."""
-
-    def __init__(self, template_dir: Optional[str] = None):
-        """Initialize script generator with template directory."""
-        self.template_dir = template_dir or "./templates"
-        self._setup_template_env()
+    """Generates scripts for integration actions."""
+    
+    def __init__(self, config: WorkflowConfiguration, template_manager: TemplateManager):
+        """
+        Initialize script generator.
         
-    def _setup_template_env(self):
-        """Set up the Jinja2 template environment."""
+        Args:
+            config: Workflow configuration
+            template_manager: Template manager for rendering templates
+        """
+        self.config = config
+        self.template_manager = template_manager
+        self.validator = ScriptValidator(config)
+        
+    async def generate_script(self, state: WorkflowState) -> WorkflowState:
+        """
+        Generate a script based on workflow state.
+        
+        Args:
+            state: Workflow state with template and parameters
+            
+        Returns:
+            Updated workflow state with generated script
+        """
+        # Get template key from state or discover based on integration type
+        template_key = state.template_key
+        
+        if not template_key:
+            template_key = await self._discover_template_key(state)
+            
+        if not template_key:
+            error_msg = f"No template found for {state.integration_type}/{state.action}/{state.target_name}"
+            logger.error(error_msg)
+            return state.set_error(error_msg)
+            
+        logger.info(f"Generating script using template: {template_key}")
+        
+        # Prepare template context
+        context = self._prepare_template_context(state)
+        
+        # Render the template
         try:
-            # Create a list of template loaders
-            template_loaders = []
+            script = self.template_manager.render_template(template_key, context)
             
-            # Add the provided template directory if it exists
-            template_dir = Path(self.template_dir)
-            if template_dir.exists() and template_dir.is_dir():
-                template_loaders.append(FileSystemLoader(str(template_dir)))
-                logger.debug(f"Added template directory: {template_dir}")
+            if not script:
+                error_msg = f"Failed to render template: {template_key}"
+                logger.error(error_msg)
+                return state.set_error(error_msg)
                 
-            # Try to find common template directories
-            alt_template_dirs = [
-                Path("./integrations/common_templates"),
-                Path("./src/workflow_agent/integrations/common_templates"),
-                Path("./templates")
-            ]
+            # Validate the script
+            validation_result = self.validator.validate(script)
             
-            for alt_dir in alt_template_dirs:
-                if alt_dir.exists() and alt_dir.is_dir():
-                    template_loaders.append(FileSystemLoader(str(alt_dir)))
-                    logger.debug(f"Added alternative template directory: {alt_dir}")
+            if not validation_result["valid"]:
+                warnings = "\n".join(validation_result["warnings"])
+                error_msg = f"Script validation failed:\n{warnings}"
+                
+                # Only fail if least privilege execution is enabled
+                if self.config.least_privilege_execution:
+                    logger.error(error_msg)
+                    return state.set_error(error_msg)
+                else:
+                    logger.warning(error_msg)
+                    state = state.add_warning(error_msg)
             
-            # Try to add package templates
-            try:
-                template_loaders.append(PackageLoader("workflow_agent", "templates"))
-                logger.debug("Added package templates")
-            except Exception as e:
-                logger.debug(f"Failed to add package templates: {e}")
+            # Store the script in state
+            state = state.set_script(script)
             
-            # Create the Jinja2 environment with all loaders
-            self.jinja_env = Environment(
-                loader=ChoiceLoader(template_loaders),
-                autoescape=select_autoescape(['html', 'xml']),
-                trim_blocks=True,
-                lstrip_blocks=True
+            # Add diagnostics
+            diagnostics = {
+                "template_key": template_key,
+                "script_size": len(script),
+                "validation_warnings": validation_result.get("warnings", [])
+            }
+            
+            state = state.evolve(
+                template_data={
+                    **state.template_data,
+                    "script_diagnostics": diagnostics
+                }
             )
             
-            logger.info("Template environment initialized successfully")
-        except Exception as e:
-            logger.error(f"Failed to initialize template environment: {e}", exc_info=True)
-            raise ScriptError(f"Template environment initialization failed: {e}")
-
-    async def generate_script(self, state: WorkflowState) -> Dict[str, Any]:
-        """Generate a script from a workflow state using templates."""
-        try:
-            logger.info(f"Generating {state.action} script for {state.target_name}")
+            logger.info(f"Script generated successfully ({len(script)} bytes)")
+            return state
             
-            # Get template path
-            template_path = self._resolve_template_path(state)
-            if not template_path:
-                return {"error": f"No template found for {state.action} action on {state.target_name}"}
-            
-            logger.debug(f"Using template: {template_path}")
-            
-            # Prepare template variables
-            template_vars = self._prepare_template_variables(state)
-            
-            # Render the template
-            template_name = Path(template_path).name
-            try:
-                template = self.jinja_env.get_template(f"{state.action}/{template_name}")
-            except TemplateNotFound:
-                # Try using default template instead
-                is_windows = state.system_context.get("platform", {}).get("system", "").lower() == "windows"
-                default_template = f"default.{'ps1' if is_windows else 'sh'}.j2"
-                try:
-                    template = self.jinja_env.get_template(f"{state.action}/{default_template}")
-                    logger.warning(f"Template {template_name} not found, using default template: {default_template}")
-                    template_name = default_template
-                except TemplateNotFound:
-                    return {"error": f"Template not found: {template_name} and no default template available"}
-                
-            script = template.render(**template_vars)
-            
-            # Save the generated script
-            script_path = self._save_script(state, script)
-            
-            return {
-                "success": True,
-                "script": script,
-                "script_path": str(script_path),
-                "template_used": template_name
-            }
         except Exception as e:
             logger.error(f"Error generating script: {e}", exc_info=True)
-            return {
-                "success": False,
-                "error": str(e)
-            }
+            return state.set_error(f"Error generating script: {str(e)}")
+    
+    async def _discover_template_key(self, state: WorkflowState) -> Optional[str]:
+        """
+        Discover the appropriate template key based on state.
+        
+        Args:
+            state: Workflow state
             
-    def _resolve_template_path(self, state: WorkflowState) -> Optional[str]:
-        """Resolve the template path based on the workflow state."""
-        # Start with the template key from the state if available
-        if state.template_key:
-            return state.template_key
-            
-        # Check for Windows vs Linux platform-specific templates
-        is_windows = state.system_context.get("platform", {}).get("system", "").lower() == "windows"
-        ext = ".ps1.j2" if is_windows else ".sh.j2"
-            
-        # Try to construct a template path based on action and target
-        template_paths = [
-            f"{state.target_name}{ext}",
-            f"{state.integration_type}{ext}",
-            f"default{ext}"
+        Returns:
+            Template key or None if not found
+        """
+        # Try several options in order of specificity
+        options = [
+            f"{state.action}/{state.integration_type}/{state.target_name}",
+            f"{state.action}/{state.integration_type}/default",
+            f"{state.action}/default"
         ]
         
-        # Check if any of these templates exist
-        for path in template_paths:
-            try:
-                full_path = f"{state.action}/{path}"
-                if self.jinja_env.get_template(full_path):
-                    return path
-            except Exception:
-                pass
+        # Check on-disk templates
+        for option in options:
+            logger.debug(f"Checking template: {option}")
+            if self.template_manager.get_template(option):
+                return option
                 
-        # Just return the most likely path even if it doesn't exist
-        return f"{state.integration_type}{ext}"
+        # If using an LLM, we can dynamically generate a template
+        if self.config.script_generator == "llm" and hasattr(self, "_generate_llm_template"):
+            logger.info("No static template found, generating with LLM")
+            try:
+                llm_template = await self._generate_llm_template(state)
+                
+                if llm_template:
+                    # Store in a temporary location
+                    template_path = Path(self.config.template_dir) / f"{state.action}/{state.integration_type}"
+                    template_path.mkdir(parents=True, exist_ok=True)
+                    
+                    template_file = template_path / f"{state.target_name}.j2"
+                    with open(template_file, "w") as f:
+                        f.write(llm_template)
+                        
+                    # Reload templates
+                    self.template_manager.reload_templates()
+                    
+                    return f"{state.action}/{state.integration_type}/{state.target_name}"
+                    
+            except Exception as e:
+                logger.error(f"Error generating LLM template: {e}")
+                
+        return None
+    
+    def _prepare_template_context(self, state: WorkflowState) -> Dict[str, Any]:
+        """
+        Prepare the template context from state.
+        
+        Args:
+            state: Workflow state
             
-    def _prepare_template_variables(self, state: WorkflowState) -> Dict[str, Any]:
-        """Prepare variables for template rendering."""
-        variables = {
+        Returns:
+            Template context dictionary
+        """
+        context = {
             "action": state.action,
             "target_name": state.target_name,
             "integration_type": state.integration_type,
-            "parameters": state.parameters,
-            "system": state.system_context.get("platform", {}),
-            "timestamp": self._get_timestamp()
+            "execution_id": state.execution_id,
+            "system_context": state.system_context
         }
         
-        # Add template data if available
+        # Add parameters
+        if state.parameters:
+            context.update(state.parameters)
+            
+        # Add template data
         if state.template_data:
-            variables.update(state.template_data)
+            context.update(state.template_data)
             
-        return variables
-        
-    def _get_timestamp(self) -> str:
-        """Get current timestamp string."""
-        from datetime import datetime
-        return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        
-    def _save_script(self, state: WorkflowState, script: str) -> Path:
-        """Save the generated script to a file."""
-        # Create scripts directory if it doesn't exist
-        script_dir = Path("generated_scripts")
-        script_dir.mkdir(exist_ok=True)
-        
-        # Determine file extension based on platform
-        is_windows = state.system_context.get("platform", {}).get("system", "").lower() == "windows"
-        ext = ".ps1" if is_windows else ".sh"
-        
-        # Create filename
-        timestamp = self._get_timestamp().replace(" ", "_").replace(":", "")
-        filename = f"{state.target_name}_{state.action}_{timestamp}{ext}"
-        
-        # Save the script
-        script_path = script_dir / filename
-        with open(script_path, "w") as f:
-            f.write(script)
-            
-        logger.info(f"Script saved to: {script_path}")
-        return script_path
+        return context
