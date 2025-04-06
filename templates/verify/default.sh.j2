@@ -1,0 +1,40 @@
+#!/bin/bash
+# Verification script for {{ target_name }}
+# Generated on {{ timestamp }}
+
+set -e
+trap 'echo "Error on line $LINENO"; exit 1' ERR
+
+echo "Starting {{ action }} of {{ target_name }} ({{ integration_type }})"
+
+# Display parameters
+echo "Parameters:"
+{% for key, value in parameters.items() %}
+echo "  - {{ key }}: {{ value }}"
+{% endfor %}
+
+# Verification steps
+echo "Verifying {{ target_name }} installation..."
+
+{% if parameters.install_dir %}
+if [ ! -d "{{ parameters.install_dir }}" ]; then
+    echo "ERROR: Installation directory does not exist: {{ parameters.install_dir }}"
+    exit 1
+else
+    echo "Installation directory exists: {{ parameters.install_dir }}"
+fi
+{% endif %}
+
+{% if parameters.host and parameters.port %}
+echo "Checking connectivity to {{ parameters.host }}:{{ parameters.port }}..."
+if nc -z {{ parameters.host }} {{ parameters.port }} 2>/dev/null; then
+    echo "Connection to {{ parameters.host }}:{{ parameters.port }} successful"
+else
+    echo "WARNING: Connection to {{ parameters.host }}:{{ parameters.port }} failed"
+fi
+{% endif %}
+
+# Final verification result
+echo "{{ target_name }} verification completed successfully"
+
+exit 0

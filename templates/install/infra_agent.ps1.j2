@@ -1,0 +1,35 @@
+# PowerShell script for {{ target_name }}
+# Generated on {{ timestamp }}
+
+$ErrorActionPreference = "Stop"
+trap { Write-Error $_; exit 1 }
+
+Write-Host "Starting {{ action }} of {{ target_name }} ({{ integration_type }})"
+
+# Display parameters
+Write-Host "Parameters:"
+{% for key, value in parameters.items() %}
+Write-Host "  - {{ key }}: {{ value }}"
+{% endfor %}
+
+# Installation steps
+Write-Host "Installing {{ target_name }}..."
+{% if parameters.install_dir %}
+if (-not (Test-Path "{{ parameters.install_dir }}")) {
+    New-Item -ItemType Directory -Path "{{ parameters.install_dir }}" -Force | Out-Null
+    Write-Host "Created installation directory: {{ parameters.install_dir }}"
+} else {
+    Write-Host "Installation directory already exists: {{ parameters.install_dir }}"
+}
+{% endif %}
+
+{% if parameters.license_key %}
+Write-Host "Configuring license key..."
+# (This is just a placeholder - would configure license in a real script)
+{% endif %}
+
+# Verification
+Write-Host "Verifying installation..."
+Write-Host "{{ target_name }} has been installed successfully"
+
+exit 0

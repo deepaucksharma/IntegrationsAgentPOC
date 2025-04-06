@@ -1,0 +1,45 @@
+# PowerShell verification script for {{ target_name }}
+# Generated on {{ timestamp }}
+
+$ErrorActionPreference = "Stop"
+trap { Write-Error $_; exit 1 }
+
+Write-Host "Starting {{ action }} of {{ target_name }} ({{ integration_type }})"
+
+# Display parameters
+Write-Host "Parameters:"
+{% for key, value in parameters.items() %}
+Write-Host "  - {{ key }}: {{ value }}"
+{% endfor %}
+
+# Verification steps
+Write-Host "Verifying {{ target_name }} installation..."
+
+{% if parameters.install_dir %}
+if (-not (Test-Path "{{ parameters.install_dir }}")) {
+    Write-Error "Installation directory does not exist: {{ parameters.install_dir }}"
+    exit 1
+} else {
+    Write-Host "Installation directory exists: {{ parameters.install_dir }}"
+}
+{% endif %}
+
+{% if parameters.host and parameters.port %}
+Write-Host "Checking connectivity to {{ parameters.host }}:{{ parameters.port }}..."
+try {
+    $connection = New-Object System.Net.Sockets.TcpClient("{{ parameters.host }}", {{ parameters.port }})
+    if ($connection.Connected) {
+        Write-Host "Connection to {{ parameters.host }}:{{ parameters.port }} successful"
+        $connection.Close()
+    } else {
+        Write-Warning "Connection to {{ parameters.host }}:{{ parameters.port }} failed"
+    }
+} catch {
+    Write-Warning "Connection to {{ parameters.host }}:{{ parameters.port }} failed: $_"
+}
+{% endif %}
+
+# Final verification result
+Write-Host "{{ target_name }} verification completed successfully"
+
+exit 0

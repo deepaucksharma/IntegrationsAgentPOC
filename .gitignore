@@ -1,42 +1,38 @@
-# Python
-*.pyc
+# Python bytecode
 __pycache__/
-*.egg-info
-.pytest_cache/
 *.py[cod]
 *$py.class
+
+# Distribution / packaging
 dist/
 build/
-*.egg
+*.egg-info/
 
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*.swn
-.DS_Store
-
-# Virtual Environment
+# Virtual environments
 venv/
 env/
-.env/
-.venv/
 ENV/
 
-# Coverage and testing
-.coverage
-coverage.xml
-htmlcov/
-.tox/
-nosetests.xml
-.hypothesis/
+# Generated scripts
+generated_scripts/
 
-# Logs and databases
+# Logs
 *.log
-workflow_history.db
-*.sqlite3
+logs/
+
+# IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Local configuration
+*.env
+.env
+
+# Database files
 *.db
+*.sqlite3
 
 # OS generated files
 .DS_Store
@@ -46,7 +42,3 @@ workflow_history.db
 .Trashes
 ehthumbs.db
 Thumbs.db
-
-# Generated files
-generated_scripts/
-*.generated.*

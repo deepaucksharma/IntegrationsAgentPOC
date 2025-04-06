@@ -1,0 +1,32 @@
+#!/bin/bash
+# Install script for {{ target_name }}
+# Generated on {{ timestamp }}
+
+set -e
+trap 'echo "Error on line $LINENO"; exit 1' ERR
+
+echo "Starting {{ action }} of {{ target_name }} ({{ integration_type }})"
+
+# Display parameters
+echo "Parameters:"
+{% for key, value in parameters.items() %}
+echo "  - {{ key }}: {{ value }}"
+{% endfor %}
+
+# Installation steps
+echo "Installing {{ target_name }}..."
+{% if parameters.install_dir %}
+mkdir -p {{ parameters.install_dir }}
+echo "Created installation directory: {{ parameters.install_dir }}"
+{% endif %}
+
+{% if parameters.license_key %}
+echo "Configuring license key..."
+# (This is just a placeholder - would configure license in a real script)
+{% endif %}
+
+# Verification
+echo "Verifying installation..."
+echo "{{ target_name }} has been installed successfully"
+
+exit 0

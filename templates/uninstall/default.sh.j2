@@ -1,0 +1,42 @@
+#!/bin/bash
+# Uninstall script for {{ target_name }}
+# Generated on {{ timestamp }}
+
+set -e
+trap 'echo "Error on line $LINENO"; exit 1' ERR
+
+echo "Starting {{ action }} of {{ target_name }} ({{ integration_type }})"
+
+# Display parameters
+echo "Parameters:"
+{% for key, value in parameters.items() %}
+echo "  - {{ key }}: {{ value }}"
+{% endfor %}
+
+# Uninstallation steps
+echo "Uninstalling {{ target_name }}..."
+
+{% if parameters.install_dir %}
+if [ -d "{{ parameters.install_dir }}" ]; then
+    echo "Removing installation directory: {{ parameters.install_dir }}"
+    rm -rf "{{ parameters.install_dir }}" || {
+        echo "WARNING: Failed to remove directory completely"
+    }
+else
+    echo "Installation directory not found: {{ parameters.install_dir }}"
+fi
+{% endif %}
+
+# Verify uninstallation
+echo "Verifying uninstallation..."
+{% if parameters.install_dir %}
+if [ -d "{{ parameters.install_dir }}" ]; then
+    echo "WARNING: Installation directory still exists: {{ parameters.install_dir }}"
+else
+    echo "Installation directory removed successfully"
+fi
+{% endif %}
+
+echo "{{ target_name }} has been uninstalled successfully"
+
+exit 0

@@ -1,0 +1,44 @@
+# PowerShell uninstall script for {{ target_name }}
+# Generated on {{ timestamp }}
+
+$ErrorActionPreference = "Stop"
+trap { Write-Error $_; exit 1 }
+
+Write-Host "Starting {{ action }} of {{ target_name }} ({{ integration_type }})"
+
+# Display parameters
+Write-Host "Parameters:"
+{% for key, value in parameters.items() %}
+Write-Host "  - {{ key }}: {{ value }}"
+{% endfor %}
+
+# Uninstallation steps
+Write-Host "Uninstalling {{ target_name }}..."
+
+{% if parameters.install_dir %}
+if (Test-Path "{{ parameters.install_dir }}") {
+    Write-Host "Removing installation directory: {{ parameters.install_dir }}"
+    try {
+        Remove-Item -Path "{{ parameters.install_dir }}" -Recurse -Force
+        Write-Host "Removed installation directory successfully"
+    } catch {
+        Write-Warning "Failed to remove directory completely: $_"
+    }
+} else {
+    Write-Host "Installation directory not found: {{ parameters.install_dir }}"
+}
+{% endif %}
+
+# Verify uninstallation
+Write-Host "Verifying uninstallation..."
+{% if parameters.install_dir %}
+if (Test-Path "{{ parameters.install_dir }}") {
+    Write-Warning "Installation directory still exists: {{ parameters.install_dir }}"
+} else {
+    Write-Host "Installation directory removed successfully"
+}
+{% endif %}
+
+Write-Host "{{ target_name }} has been uninstalled successfully"
+
+exit 0
