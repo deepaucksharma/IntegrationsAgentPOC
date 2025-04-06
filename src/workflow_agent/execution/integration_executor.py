@@ -1,35 +1,30 @@
-"""Execution handling for integrations."""
-from typing import Dict, Any, Optional
+"""
+Integration executor functionality has been moved to executor.py.
+This module is maintained for backward compatibility.
+New code should use executor.ScriptExecutor directly.
+"""
 
-from ..error.exceptions import IntegrationExecutionError
+from .executor import ScriptExecutor
 
 class IntegrationExecutor:
-    """Handles execution of integration operations."""
+    """Redirects to ScriptExecutor for backward compatibility."""
     
     def __init__(self):
-        self._context = {}
+        """Initialize with warning about deprecated usage."""
+        import logging
+        logging.getLogger(__name__).warning(
+            "IntegrationExecutor is deprecated. Use ScriptExecutor instead."
+        )
+        self._executor = ScriptExecutor(None)  # Pass None as config for compatibility
         
-    async def execute(self, integration: Any, action: str, params: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute an integration action."""
-        try:
-            if not hasattr(integration, action):
-                raise IntegrationExecutionError(f"Action {action} not supported by integration")
-                
-            method = getattr(integration, action)
-            result = await method(params)
+    async def execute(self, integration: any, action: str, params: dict) -> dict:
+        """Redirects to ScriptExecutor.execute_integration."""
+        return await self._executor.execute_integration(integration, action, params)
             
-            if not isinstance(result, dict):
-                raise IntegrationExecutionError("Integration action must return a dictionary")
-                
-            return result
-            
-        except Exception as e:
-            raise IntegrationExecutionError(f"Execution failed: {str(e)}")
-            
-    def set_context(self, key: str, value: Any) -> None:
-        """Set execution context value."""
-        self._context[key] = value
+    def set_context(self, key: str, value: any) -> None:
+        """Redirects to ScriptExecutor.set_context."""
+        self._executor.set_context(key, value)
         
-    def get_context(self, key: str, default: Any = None) -> Any:
-        """Get execution context value."""
-        return self._context.get(key, default)
+    def get_context(self, key: str, default: any = None) -> any:
+        """Redirects to ScriptExecutor.get_context."""
+        return self._executor.get_context(key, default)

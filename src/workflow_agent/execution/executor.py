@@ -27,6 +27,7 @@ class ScriptExecutor:
             config: Workflow configuration
         """
         self.config = config
+        self._context = {}  # Execution context for integration execution
         
     async def execute(self, state: WorkflowState) -> WorkflowState:
         """
@@ -421,3 +422,46 @@ fi
             changes_list.append(change)
         except Exception as e:
             logger.error(f"Error processing change item: {e}")
+            
+    # Integration Execution Methods (merged from integration_executor.py)
+    
+    async def execute_integration(self, integration: Any, action: str, params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Execute an integration action.
+        
+        Args:
+            integration: Integration instance
+            action: Action to perform (e.g., 'install', 'verify', 'uninstall')
+            params: Parameters for the action
+            
+        Returns:
+            Dictionary with execution results
+            
+        Raises:
+            IntegrationExecutionError: If execution fails
+        """
+        try:
+            if not hasattr(integration, action):
+                from ..error.exceptions import IntegrationExecutionError
+                raise IntegrationExecutionError(f"Action {action} not supported by integration")
+                
+            method = getattr(integration, action)
+            result = await method(params)
+            
+            if not isinstance(result, dict):
+                from ..error.exceptions import IntegrationExecutionError
+                raise IntegrationExecutionError("Integration action must return a dictionary")
+                
+            return result
+            
+        except Exception as e:
+            from ..error.exceptions import IntegrationExecutionError
+            raise IntegrationExecutionError(f"Execution failed: {str(e)}")
+            
+    def set_context(self, key: str, value: Any) -> None:
+        """Set execution context value."""
+        self._context[key] = value
+        
+    def get_context(self, key: str, default: Any = None) -> Any:
+        """Get execution context value."""
+        return self._context.get(key, default)
