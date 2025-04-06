@@ -1,19 +1,31 @@
 """
-Integration manager for handling integration lifecycle.
+Enhanced integration manager for handling integration lifecycle.
 """
 import logging
-from typing import Dict, Any, Optional, List
+import importlib
+import inspect
+from typing import Dict, Any, Optional, List, Type, Set
+from pathlib import Path
 
 from .base import IntegrationBase
 from .registry import IntegrationRegistry
-from ..error.exceptions import IntegrationError
+from ..error.exceptions import IntegrationError, ConfigurationError
 from ..config.configuration import WorkflowConfiguration
-from ..templates.manager import TemplateManager
 
 logger = logging.getLogger(__name__)
 
 class IntegrationManager:
-    """Manages integration operations and lifecycle."""
+    """
+    Manages integration operations and lifecycle.
+    
+    This class is responsible for:
+    1. Discovering and registering integrations
+    2. Managing integration instances
+    3. Coordinating integration operations
+    4. Validating integration parameters
+    
+    It delegates template management and execution to specialized modules.
+    """
     
     def __init__(self, config: WorkflowConfiguration, registry: Optional[IntegrationRegistry] = None):
         """
@@ -25,28 +37,113 @@ class IntegrationManager:
         """
         self.config = config
         self.registry = registry or IntegrationRegistry()
-        self.template_manager = TemplateManager(config)
         
-        # Discover plugins if plugin dirs specified
-        if config.plugin_dirs:
-            self.registry.discover_plugins(config.plugin_dirs)
-            
-        # Discover built-in integrations
+        # Track loaded modules to avoid duplicates
+        self._loaded_modules: Set[str] = set()
+        
+        # Initialize registry
+        self._initialize_registry()
+        
+        logger.info(f"IntegrationManager initialized with {len(self.registry.list_integrations())} integrations")
+        
+    def _initialize_registry(self) -> None:
+        """Initialize the integration registry with all available integrations."""
+        # First discover built-in integrations
         self._discover_built_in_integrations()
+        
+        # Then discover plugins if plugin dirs specified
+        if hasattr(self.config, 'plugin_dirs') and self.config.plugin_dirs:
+            plugin_count = self.registry.discover_plugins(self.config.plugin_dirs)
+            logger.info(f"Discovered {plugin_count} integration plugins")
         
     def _discover_built_in_integrations(self) -> None:
         """Discover and register built-in integrations."""
-        from . import infra_agent, custom, knowledge, multi_agent, rollback, strategy
+        # Get all integration submodules - we'll use a more reliable approach here
+        try:
+            from . import custom, infra_agent
+            
+            # Register base implementations
+            for package in [custom, infra_agent]:
+                module_name = package.__name__
+                if module_name in self._loaded_modules:
+                    continue
+                    
+                self._loaded_modules.add(module_name)
+                
+                # Look for integration classes
+                for name, obj in inspect.getmembers(package):
+                    if (inspect.isclass(obj) and 
+                            issubclass(obj, IntegrationBase) and 
+                            obj != IntegrationBase and
+                            not inspect.isabstract(obj)):
+                        self.registry.register(obj)
+            
+            # Also try automatic discovery using the IntegrationBase method
+            for impl_class in IntegrationBase.discover_implementations():
+                self.registry.register(impl_class)
+                
+        except Exception as e:
+            logger.error(f"Error discovering built-in integrations: {e}", exc_info=True)
+    
+    async def execute_integration_action(
+        self, 
+        integration_type: str, 
+        action: str, 
+        parameters: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Execute an integration action with the given parameters.
         
-        modules = [infra_agent, custom, knowledge, multi_agent, rollback, strategy]
-        for module in modules:
-            # Attempt to get the module's integrations
-            if hasattr(module, 'get_integrations'):
-                try:
-                    for integration_class in module.get_integrations():
-                        self.registry.register(integration_class)
-                except Exception as e:
-                    logger.error(f"Error loading integrations from {module.__name__}: {e}")
+        Args:
+            integration_type: Type of integration to use
+            action: Action to perform (install, verify, uninstall)
+            parameters: Parameters for the action
+            
+        Returns:
+            Action result
+            
+        Raises:
+            IntegrationError: If integration not found or action fails
+        """
+        # Get the integration
+        integration = self.get_integration(integration_type)
+        if not integration:
+            available = ", ".join(list(self.registry.list_integrations().keys()))
+            raise IntegrationError(
+                f"Integration '{integration_type}' not found. Available: {available}",
+                details={"available_integrations": available}
+            )
+        
+        # Validate parameters
+        validation = await integration.validate_parameters(parameters)
+        if not validation.get("valid", False):
+            errors = validation.get("errors", ["Unknown validation error"])
+            error_msg = "; ".join(errors)
+            raise IntegrationError(
+                f"Invalid parameters for {integration_type}: {error_msg}",
+                details={"errors": errors}
+            )
+        
+        # Execute the requested action
+        try:
+            if action == "install":
+                return await integration.install(parameters)
+            elif action == "verify":
+                return await integration.verify(parameters)
+            elif action == "uninstall":
+                return await integration.uninstall(parameters)
+            else:
+                raise IntegrationError(
+                    f"Unsupported action: {action}",
+                    details={"supported_actions": ["install", "verify", "uninstall"]}
+                )
+        except Exception as e:
+            if isinstance(e, IntegrationError):
+                raise
+            raise IntegrationError(
+                f"Error executing {action} on {integration_type}: {str(e)}",
+                details={"error": str(e), "integration": integration_type, "action": action}
+            ) from e
     
     def get_integration(self, integration_type: str) -> Optional[IntegrationBase]:
         """
@@ -60,52 +157,47 @@ class IntegrationManager:
         """
         integration = self.registry.get_instance(integration_type)
         if not integration:
-            logger.error(f"Integration not found: {integration_type}")
-            available = list(self.registry.list_integrations().keys())
-            logger.info(f"Available integrations: {available}")
+            logger.warning(f"Integration not found: {integration_type}")
             
         return integration
         
     def list_integrations(self) -> Dict[str, Dict[str, Any]]:
         """
-        List all available integrations.
+        List all available integrations with their metadata.
         
         Returns:
             Dictionary of integration information
         """
         return self.registry.list_integrations()
         
-    def get_template_for_integration(
-        self, 
-        integration_type: str, 
-        action: str, 
-        target: str
-    ) -> Optional[str]:
+    def get_integration_info(self, integration_type: str) -> Optional[Dict[str, Any]]:
         """
-        Get a template for an integration action.
+        Get detailed information about a specific integration.
         
         Args:
             integration_type: Type of integration
-            action: Action (install, verify, uninstall, etc.)
-            target: Target identifier
             
         Returns:
-            Template key or None if not found
+            Integration information or None if not found
         """
-        # Try specific template first
-        template_key = f"{action}/{integration_type}/{target}"
-        if self.template_manager.get_template(template_key):
-            return template_key
-            
-        # Try integration-wide template
-        template_key = f"{action}/{integration_type}/default"
-        if self.template_manager.get_template(template_key):
-            return template_key
-            
-        # Try action-wide template
-        template_key = f"{action}/default"
-        if self.template_manager.get_template(template_key):
-            return template_key
-            
-        logger.warning(f"No template found for {integration_type}/{action}/{target}")
+        integration = self.get_integration(integration_type)
+        if integration:
+            return integration.get_info()
         return None
+        
+    def reload_integrations(self) -> int:
+        """
+        Reload all integrations (clear and rediscover).
+        
+        Returns:
+            Number of integrations loaded
+        """
+        # Clear existing integrations
+        self.registry.clear()
+        self._loaded_modules.clear()
+        
+        # Rediscover integrations
+        self._initialize_registry()
+        
+        # Return count
+        return len(self.registry.list_integrations())
