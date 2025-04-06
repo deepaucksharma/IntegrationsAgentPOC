@@ -2,9 +2,9 @@ Metadata-Version: 2.4
 Name: workflow-agent
 Version: 1.0.0
 Summary: Workflow Agent for managing infrastructure and integrations
-Home-page: https://github.com/yourusername/workflow-agent
-Author: Your Name
-Author-email: your.email@example.com
+Home-page: https://github.com/example/workflow-agent
+Author: Your Organization
+Author-email: example@example.com
 Classifier: Development Status :: 3 - Alpha
 Classifier: Intended Audience :: Developers
 Classifier: License :: OSI Approved :: MIT License
@@ -14,15 +14,24 @@ Classifier: Programming Language :: Python :: 3.9
 Classifier: Programming Language :: Python :: 3.10
 Classifier: Programming Language :: Python :: 3.11
 Requires-Python: >=3.8
+Requires-Dist: jinja2>=3.1.2
+Requires-Dist: typer>=0.9.0
 Requires-Dist: pyyaml>=6.0
-Requires-Dist: pydantic>=2.0
-Requires-Dist: jinja2>=3.0
-Requires-Dist: aiohttp>=3.8
-Requires-Dist: python-dotenv>=1.0
+Requires-Dist: pydantic<3.0.0,>=2.0.0
+Requires-Dist: typing-extensions>=4.0.0
+Requires-Dist: aiohttp>=3.8.0
+Requires-Dist: requests>=2.28.0
+Requires-Dist: psutil>=5.9.5
+Requires-Dist: aiofiles>=22.1.0
+Requires-Dist: shellcheck-py>=0.9.0.6
+Requires-Dist: python-dotenv>=1.0.0
+Requires-Dist: beautifulsoup4>=4.9.3
+Requires-Dist: lxml>=4.9.0
 Provides-Extra: llm
 Requires-Dist: langchain>=0.1.0; extra == "llm"
 Requires-Dist: openai>=1.0.0; extra == "llm"
 Requires-Dist: google-generativeai>=0.3.0; extra == "llm"
+Requires-Dist: tavily-python>=0.2.0; extra == "llm"
 Provides-Extra: dev
 Requires-Dist: pytest>=7.0; extra == "dev"
 Requires-Dist: pytest-asyncio>=0.21.0; extra == "dev"

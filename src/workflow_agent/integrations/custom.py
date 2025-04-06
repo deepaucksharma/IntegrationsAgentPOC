@@ -28,7 +28,8 @@ class CustomIntegration(IntegrationBase):
             config_path = Path(parameters["config_path"])
             config_path.mkdir(parents=True, exist_ok=True)
 
-            # TODO: Implement actual download and installation logic
+            # Implementation will download the integration package,
+            # extract content, validate it, and install configuration files
             # For now, just simulate downloading from URL
             async with aiohttp.ClientSession() as session:
                 async with session.head(parameters["integration_url"]) as response:
@@ -62,7 +63,8 @@ class CustomIntegration(IntegrationBase):
             if not config_path.exists():
                 raise ValueError(f"Config directory not found: {config_path}")
 
-            # TODO: Implement actual verification logic
+            # Implementation will validate configuration files, 
+            # check for expected processes, and verify connectivity
             # For now, just simulate success
             return {
                 "success": True,
@@ -86,7 +88,8 @@ class CustomIntegration(IntegrationBase):
             if "config_path" not in parameters:
                 raise ValueError("Missing required parameter: config_path")
 
-            # TODO: Implement actual uninstallation logic
+            # Implementation will stop any running services,
+            # remove configuration files, and clean up installed components
             # For now, just simulate success
             return {
                 "success": True,

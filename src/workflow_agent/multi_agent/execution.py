@@ -73,7 +73,7 @@ class ExecutionAgent:
                 logger.debug("[ExecutionAgent] Published execution failure for workflow %s", workflow_id)
                 return
             
-            for key in ["output", "metrics", "changes", "legacy_changes", "transaction_id", "execution_id"]:
+            for key in ["output", "metrics", "changes", "transaction_id", "execution_id"]:
                 if key in exec_result:
                     logger.debug("[ExecutionAgent] Setting %s in state: %s", key, exec_result[key])
                     setattr(state, key, exec_result[key])

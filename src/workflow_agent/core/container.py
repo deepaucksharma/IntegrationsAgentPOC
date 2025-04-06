@@ -1,190 +1,321 @@
-"""Dependency injection container for workflow agent."""
+"""
+Dependency container for managing component dependencies.
+"""
 import logging
-from typing import Dict, Any, Optional, Type, TypeVar
-from dataclasses import dataclass, field
+from typing import Dict, Any, Optional, Type, TypeVar, Generic, cast
+from dataclasses import dataclass
 
 from ..error.exceptions import InitializationError
 from ..utils.platform_manager import PlatformManager
 from ..utils.resource_manager import ResourceManager
-from ..execution.executor import ScriptExecutor
-from ..scripting.generator import ScriptGenerator
-from ..scripting.validator import ScriptValidator
-from ..scripting.dynamic_generator import DynamicScriptGenerator
-from ..verification.dynamic import DynamicVerificationBuilder
-from ..knowledge.integration import DynamicIntegrationKnowledge
-from ..strategy.installation import InstallationStrategyAgent
-from ..rollback.recovery import RecoveryManager
-from ..storage.history import ExecutionHistoryManager
-from ..config.configuration import WorkflowConfiguration
-from ..integrations.manager import IntegrationManager
 
 logger = logging.getLogger(__name__)
 
 T = TypeVar('T')
 
-@dataclass
-class ComponentRegistry:
-    """Registry for workflow agent components."""
-    components: Dict[str, Any] = field(default_factory=dict)
-    initialized: Dict[str, bool] = field(default_factory=dict)
-    dependencies: Dict[str, set] = field(default_factory=dict)
+class Provider:
+    """Interface for component provider."""
+    def get(self) -> Any:
+        """Get instance of component."""
+        raise NotImplementedError("Provider must implement get()")
+
+class SingletonProvider(Provider, Generic[T]):
+    """Provider that creates a singleton instance."""
+    
+    def __init__(self, component_type: Type[T], *args, **kwargs):
+        """
+        Initialize with component type and arguments.
+        
+        Args:
+            component_type: Class to instantiate
+            *args: Arguments for initialization
+            **kwargs: Keyword arguments for initialization
+        """
+        self.component_type = component_type
+        self.args = args
+        self.kwargs = kwargs
+        self.instance: Optional[T] = None
+        
+    def get(self) -> T:
+        """
+        Get or create instance.
+        
+        Returns:
+            Component instance
+        """
+        if self.instance is None:
+            self.instance = self.component_type(*self.args, **self.kwargs)
+        return self.instance
+
+class FactoryProvider(Provider, Generic[T]):
+    """Provider that creates a new instance each time."""
+    
+    def __init__(self, component_type: Type[T], *args, **kwargs):
+        """
+        Initialize with component type and arguments.
+        
+        Args:
+            component_type: Class to instantiate
+            *args: Arguments for initialization
+            **kwargs: Keyword arguments for initialization
+        """
+        self.component_type = component_type
+        self.args = args
+        self.kwargs = kwargs
+        
+    def get(self) -> T:
+        """
+        Create and return new instance.
+        
+        Returns:
+            Component instance
+        """
+        return self.component_type(*self.args, **self.kwargs)
+
+class InstanceProvider(Provider, Generic[T]):
+    """Provider that returns a pre-created instance."""
+    
+    def __init__(self, instance: T):
+        """
+        Initialize with instance.
+        
+        Args:
+            instance: Pre-created component instance
+        """
+        self.instance = instance
+        
+    def get(self) -> T:
+        """
+        Return the instance.
+        
+        Returns:
+            Component instance
+        """
+        return self.instance
 
 class DependencyContainer:
-    """Manages workflow agent dependencies."""
-
-    def __init__(self, config: WorkflowConfiguration):
-        """Initialize the container."""
-        self.config = config
-        self.components = {}
-        self.registry = ComponentRegistry()
-        self._setup_dependencies()
-
-    def _setup_dependencies(self) -> None:
-        """Setup component dependency graph."""
-        self.dependencies = {
-            'platform_manager': set(),
-            'resource_manager': set(),
-            'history_manager': set(),
-            'integration_manager': set(),
-            'script_executor': {'platform_manager', 'resource_manager'},
-            'script_generator': {'history_manager'},
-            'script_validator': set(),
-            'dynamic_script_generator': set(),
-            'verification_builder': set(),
-            'integration_knowledge': set(),
-            'installation_strategy': set(),
-            'recovery_manager': {'history_manager'}
-        }
-
-    async def initialize(self) -> None:
-        """Initialize all components."""
-        try:
-            # Register core components
-            self.register('platform_manager', PlatformManager())
-            self.register('resource_manager', ResourceManager())
-            self.register('history_manager', ExecutionHistoryManager())
-            
-            # Register integration manager
-            if self.config and hasattr(self.config, 'plugin_dirs'):
-                self.register('integration_manager', IntegrationManager(self.config.plugin_dirs))
-            
-            # Register execution components
-            self.register('script_executor', ScriptExecutor(
-                platform_manager=self.get('platform_manager'),
-                resource_manager=self.get('resource_manager')
-            ))
-            
-            # Register script handling components
-            self.register('script_generator', ScriptGenerator(
-                history_manager=self.get('history_manager')
-            ))
-            self.register('script_validator', ScriptValidator())
-            self.register('dynamic_script_generator', DynamicScriptGenerator())
-            
-            # Register other components
-            self.register('verification_builder', DynamicVerificationBuilder())
-            self.register('integration_knowledge', DynamicIntegrationKnowledge())
-            self.register('installation_strategy', InstallationStrategyAgent())
-            self.register('recovery_manager', RecoveryManager(
-                history_manager=self.get('history_manager')
-            ))
-            
-            # Initialize components in dependency order
-            for component_name in self._get_initialization_order():
-                await self._initialize_component(component_name)
-                
-            logger.info("Container initialization complete")
-                
-        except Exception as e:
-            logger.error(f"Failed to initialize container: {e}")
-            raise InitializationError(
-                f"Container initialization failed: {str(e)}",
-                details={"error": str(e)}
-            )
-
-    async def cleanup(self) -> None:
-        """Clean up all components."""
-        cleanup_order = list(reversed(self._get_initialization_order()))
-        for component_name in cleanup_order:
-            component = self.registry.components.get(component_name)
-            if component and hasattr(component, 'cleanup'):
-                try:
-                    await component.cleanup()
-                except Exception as e:
-                    logger.error(f"Error cleaning up component {component_name}: {e}")
-
-        self.registry.components.clear()
-        logger.info("Container cleanup complete")
-
-    def register(self, name: str, component: Any) -> None:
-        """Register a component."""
-        self.components[name] = component
-        logger.debug(f"Registered component: {name}")
-        self.registry.components[name] = component
-        self.registry.initialized[name] = False
-
-    def get(self, name: str) -> Optional[Any]:
-        """Get a component by name."""
-        if not self.components:
-            raise InitializationError("Container not initialized")
-            
-        component = self.components.get(name)
-        if not component:
-            raise InitializationError(f"Component {name} not found in container")
-            
-        return component
-
-    def _get_initialization_order(self) -> list[str]:
-        """Get component initialization order based on dependencies."""
-        visited = set()
-        order = []
+    """
+    Container for managing component dependencies with enhanced provider management.
+    Supports singleton, factory, and instance providers.
+    """
+    
+    def __init__(self):
+        """Initialize container with empty providers dictionary."""
+        self.providers: Dict[str, Provider] = {}
+        self.aliases: Dict[str, str] = {}
         
-        def visit(name: str) -> None:
-            if name in visited:
-                return
-            visited.add(name)
-            for dep in self.dependencies.get(name, set()):
-                visit(dep)
-            order.append(name)
+    def register_singleton(self, name: str, component_type: Type[T], *args, **kwargs) -> None:
+        """
+        Register a singleton provider.
         
-        for name in self.dependencies:
-            visit(name)
-        return order
-
-    async def _initialize_component(self, name: str) -> None:
-        """Initialize a single component."""
-        if self.registry.initialized.get(name):
-            return
+        Args:
+            name: Component name
+            component_type: Class to instantiate
+            *args: Arguments for initialization
+            **kwargs: Keyword arguments for initialization
+        """
+        self.providers[name] = SingletonProvider(component_type, *args, **kwargs)
+        
+    def register_factory(self, name: str, component_type: Type[T], *args, **kwargs) -> None:
+        """
+        Register a factory provider.
+        
+        Args:
+            name: Component name
+            component_type: Class to instantiate
+            *args: Arguments for initialization
+            **kwargs: Keyword arguments for initialization
+        """
+        self.providers[name] = FactoryProvider(component_type, *args, **kwargs)
+        
+    def register_instance(self, name: str, instance: T) -> None:
+        """
+        Register an instance provider.
+        
+        Args:
+            name: Component name
+            instance: Pre-created component instance
+        """
+        self.providers[name] = InstanceProvider(instance)
+        
+    def register_alias(self, alias: str, target: str) -> None:
+        """
+        Register an alias for a component.
+        
+        Args:
+            alias: Alias name
+            target: Target component name
+        """
+        if target not in self.providers and target not in self.aliases:
+            raise InitializationError(f"Cannot alias to non-existent component: {target}")
+        self.aliases[alias] = target
+        
+    def get(self, name: str) -> Any:
+        """
+        Get a component by name.
+        
+        Args:
+            name: Component name
             
-        component = self.registry.components.get(name)
-        if not component:
+        Returns:
+            Component instance
+            
+        Raises:
+            InitializationError: If component not found
+        """
+        # Resolve aliases
+        resolved_name = name
+        visited_aliases = set()
+        
+        while resolved_name in self.aliases:
+            if resolved_name in visited_aliases:
+                raise InitializationError(f"Circular alias detected: {visited_aliases}")
+            visited_aliases.add(resolved_name)
+            resolved_name = self.aliases[resolved_name]
+            
+        if resolved_name not in self.providers:
+            raise InitializationError(f"Component not found: {name} (resolved to {resolved_name})")
+            
+        return self.providers[resolved_name].get()
+        
+    def has(self, name: str) -> bool:
+        """
+        Check if a component is registered.
+        
+        Args:
+            name: Component name
+            
+        Returns:
+            True if component is registered, False otherwise
+        """
+        # Resolve aliases
+        resolved_name = name
+        visited_aliases = set()
+        
+        while resolved_name in self.aliases:
+            if resolved_name in visited_aliases:
+                return False  # Circular alias
+            visited_aliases.add(resolved_name)
+            resolved_name = self.aliases[resolved_name]
+            
+        return resolved_name in self.providers
+        
+    def get_typed(self, name: str, expected_type: Type[T]) -> T:
+        """
+        Get a component with type checking.
+        
+        Args:
+            name: Component name
+            expected_type: Expected component type
+            
+        Returns:
+            Component instance of expected type
+            
+        Raises:
+            InitializationError: If component not found or wrong type
+        """
+        component = self.get(name)
+        
+        if not isinstance(component, expected_type):
             raise InitializationError(
-                f"Component {name} not found during initialization",
-                details={"component": name}
+                f"Component {name} is not of expected type {expected_type.__name__}, "
+                f"got {type(component).__name__}"
             )
             
-        try:
-            if hasattr(component, 'initialize'):
-                logger.debug(f"Initializing component: {name}")
-                await component.initialize()
-            self.registry.initialized[name] = True
-        except Exception as e:
-            raise InitializationError(
-                f"Failed to initialize component {name}: {str(e)}",
-                details={"component": name, "error": str(e)}
-            )
-
-    def validate_initialization(self) -> None:
-        """Validate that all required components are initialized."""
-        required_components = [
-            "integration_registry",
-            "integration_manager",
-            "recovery_manager",
-            "script_generator",
-            "storage_manager",
-            "verification_manager",
-            "documentation_handler"
-        ]
-        for name in required_components:
-            if name not in self.components:
-                raise ValueError(f"Required component {name} not registered") 
+        return cast(expected_type, component)
+        
+    def build_default_container(self, config) -> 'DependencyContainer':
+        """
+        Build a default container with standard dependencies.
+        
+        Args:
+            config: Application configuration
+            
+        Returns:
+            Configured container
+        """
+        # Create resource and platform managers
+        self.register_singleton("platform_manager", PlatformManager)
+        self.register_singleton("resource_manager", ResourceManager, config)
+        
+        # Register the config
+        self.register_instance("config", config)
+        
+        # Load additional components from modules
+        self._load_execution_components(config)
+        self._load_scripting_components(config)
+        self._load_verification_components(config)
+        self._load_knowledge_components(config)
+        self._load_strategy_components(config)
+        self._load_recovery_components(config)
+        self._load_storage_components(config)
+        self._load_integration_components(config)
+        
+        return self
+    
+    def _load_execution_components(self, config) -> None:
+        """Load execution-related components."""
+        from ..execution.executor import ScriptExecutor
+        from ..execution.isolation import IsolationFactory
+        
+        self.register_singleton("script_executor", ScriptExecutor, config)
+        self.register_singleton("isolation_factory", IsolationFactory)
+        
+    def _load_scripting_components(self, config) -> None:
+        """Load scripting-related components."""
+        from ..scripting.generator import ScriptGenerator
+        from ..scripting.validator import ScriptValidator
+        from ..scripting.dynamic_generator import DynamicScriptGenerator
+        from ..templates.manager import TemplateManager
+        
+        template_manager = TemplateManager(config)
+        self.register_instance("template_manager", template_manager)
+        
+        self.register_singleton("script_generator", ScriptGenerator, config, template_manager)
+        self.register_singleton("script_validator", ScriptValidator, config)
+        self.register_singleton("dynamic_script_generator", DynamicScriptGenerator, config)
+        
+    def _load_verification_components(self, config) -> None:
+        """Load verification-related components."""
+        from ..verification.dynamic import DynamicVerificationBuilder
+        from ..verification.manager import VerificationManager
+        
+        # Need template manager for VerificationManager
+        template_manager = self.get("template_manager")
+        
+        self.register_singleton("verification_manager", VerificationManager, config, template_manager)
+        self.register_singleton("dynamic_verification_builder", DynamicVerificationBuilder, config)
+        
+    def _load_knowledge_components(self, config) -> None:
+        """Load knowledge-related components."""
+        from ..knowledge.integration import DynamicIntegrationKnowledge
+        
+        self.register_singleton("dynamic_integration_knowledge", DynamicIntegrationKnowledge)
+        
+    def _load_strategy_components(self, config) -> None:
+        """Load strategy-related components."""
+        from ..strategy.installation import InstallationStrategyAgent
+        
+        self.register_singleton("installation_strategy_agent", InstallationStrategyAgent)
+        
+    def _load_recovery_components(self, config) -> None:
+        """Load recovery-related components."""
+        from ..rollback.recovery import RecoveryManager
+        
+        self.register_singleton("recovery_manager", RecoveryManager, config)
+        
+    def _load_storage_components(self, config) -> None:
+        """Load storage-related components."""
+        from ..storage.history import ExecutionHistoryManager
+        
+        self.register_singleton("execution_history_manager", ExecutionHistoryManager, config)
+        
+    def _load_integration_components(self, config) -> None:
+        """Load integration-related components."""
+        from ..integrations.manager import IntegrationManager
+        from ..integrations.registry import IntegrationRegistry
+        
+        registry = IntegrationRegistry()
+        self.register_instance("integration_registry", registry)
+        
+        self.register_singleton("integration_manager", IntegrationManager, config, registry)

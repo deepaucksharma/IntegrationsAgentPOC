@@ -1,13 +1,38 @@
+# Core dependencies
 jinja2>=3.1.2
 typer>=0.9.0
 PyYAML>=6.0
-psutil>=5.9.5
-shellcheck-py>=0.9.0.6
 pydantic>=2.0.0,<3.0.0
+typing-extensions>=4.0.0
+python-dotenv>=1.0.0
+
+# HTTP and API dependencies
 aiohttp>=3.8.0
+requests>=2.28.0
+
+# Utilities
+psutil>=5.9.5
+aiofiles>=22.1.0
+
+# Script validation
+shellcheck-py>=0.9.0.6
+
+# Platform-specific utilities
+distro>=1.8.0; sys_platform == "linux"
+
+# Documentation parsing
 beautifulsoup4>=4.9.3
 lxml>=4.9.0
-typing-extensions>=4.0.0
-aiofiles>=22.1.0
-tavily-python>=0.2.0; python_version >= "3.8"
-distro>=1.8.0; sys_platform == "linux"
+
+# LLM integrations (optional)
+google-generativeai>=0.3.0; extra == "llm"
+langchain>=0.1.0; extra == "llm"
+openai>=1.0.0; extra == "llm"
+tavily-python>=0.2.0; python_version >= "3.8" and extra == "llm"
+
+# Development tools (optional)
+pytest>=7.0; extra == "dev"
+pytest-asyncio>=0.21.0; extra == "dev"
+black>=23.0; extra == "dev"
+isort>=5.0; extra == "dev"
+mypy>=1.0; extra == "dev"

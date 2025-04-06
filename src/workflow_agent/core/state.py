@@ -147,7 +147,6 @@ class WorkflowState(BaseModel):
     verification_results: Dict[str, Any] = Field(default_factory=dict)
     rollback_script: Optional[str] = None
     recovery_strategy: Optional[str] = None
-    legacy_changes: List[Dict[str, Any]] = Field(default_factory=list)  # For backward compatibility
     
     # State tracking
     state_id: UUID = Field(default_factory=uuid4)

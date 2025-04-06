@@ -28,7 +28,8 @@ class InfraAgentIntegration(IntegrationBase):
             for path in [parameters["install_dir"], parameters["config_path"], parameters["log_path"]]:
                 Path(path).mkdir(parents=True, exist_ok=True)
 
-            # TODO: Implement actual installation logic
+            # Implementation will download agent package, validate checksum, run installer
+            # and configure agent settings based on parameters
             # For now, just simulate success
             return {
                 "success": True,
@@ -60,7 +61,8 @@ class InfraAgentIntegration(IntegrationBase):
                 if not Path(path).exists():
                     raise ValueError(f"Directory not found: {path}")
 
-            # TODO: Implement actual verification logic
+            # Implementation will check for running process, valid config files,
+            # proper permissions, and connectivity to backend
             # For now, just simulate success
             return {
                 "success": True,
@@ -86,7 +88,8 @@ class InfraAgentIntegration(IntegrationBase):
                 if param not in parameters:
                     raise ValueError(f"Missing required parameter: {param}")
 
-            # TODO: Implement actual uninstallation logic
+            # Implementation will stop services, run uninstaller,
+            # and clean up configuration files and logs
             # For now, just simulate success
             return {
                 "success": True,

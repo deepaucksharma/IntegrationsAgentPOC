@@ -62,19 +62,41 @@ class KnowledgeBase:
         self,
         integration_type: str,
         target_name: str,
-        action: str
+        action: str = None
     ) -> Optional[Dict[str, Any]]:
         """Retrieve documents for an integration."""
         try:
-            # TODO: Implement document retrieval
-            return {
-                "definition": {
+            # Check if documents exist for this integration
+            key_prefix = f"{integration_type}_{target_name}_"
+            result = {}
+            
+            # Find all documents for this integration
+            for doc_key, content in self.documents.items():
+                if doc_key.startswith(key_prefix):
+                    doc_type = doc_key[len(key_prefix):] if len(key_prefix) < len(doc_key) else "default"
+                    result[doc_type] = content
+            
+            # If no documents found, return a basic definition
+            if not result:
+                return {
+                    "definition": {
+                        "name": target_name,
+                        "type": integration_type,
+                        "actions": [action] if action else []
+                    }
+                }
+            
+            # Add basic definition info if not present
+            if "definition" not in result:
+                result["definition"] = {
                     "name": target_name,
                     "type": integration_type,
-                    "actions": [action]
+                    "actions": [action] if action else []
                 }
-            }
+                
+            return result
         except Exception as e:
+            logger.error(f"Error retrieving documents for {integration_type}_{target_name}: {e}")
             raise
     
     async def get_all_documents(self, integration_type: Optional[str] = None) -> Dict[str, Any]:

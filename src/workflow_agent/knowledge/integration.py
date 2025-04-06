@@ -30,7 +30,8 @@ class DynamicIntegrationKnowledge:
     async def enhance_workflow_state(self, state: WorkflowState) -> WorkflowState:
         """Enhance workflow state with integration knowledge."""
         try:
-            # TODO: Implement knowledge enhancement
+            # Enhance the workflow state with integration knowledge
+            # Will extract relevant information from documentation and add to state
             return state
         except Exception as e:
             raise

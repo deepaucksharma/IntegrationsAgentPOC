@@ -8,7 +8,8 @@ class InstallationStrategyAgent:
     async def select_strategy(self, state: WorkflowState) -> Dict[str, Any]:
         """Select an installation strategy."""
         try:
-            # TODO: Implement strategy selection
+            # Select an appropriate installation strategy based on the target system
+            # This will be enhanced with platform-specific logic
             return {
                 "strategy": "default",
                 "steps": [

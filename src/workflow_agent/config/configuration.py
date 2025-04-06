@@ -1,5 +1,5 @@
 """
-Configuration management for workflow agent with enhanced validation.
+Configuration management with enhanced validation and security controls.
 """
 import logging
 import os
@@ -7,442 +7,497 @@ import yaml
 import json
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union, Set
+from typing import Any, Dict, List, Optional, Set, Union
 from pydantic import BaseModel, Field, field_validator, model_validator
+import dotenv
+
 from ..error.exceptions import ConfigurationError
 
 logger = logging.getLogger(__name__)
 
-# Patterns that might indicate dangerous operations
+# Load environment variables from .env file if it exists
+dotenv.load_dotenv()
+
+# Security patterns that should be detected and blocked
 DANGEROUS_PATTERNS = [
-    r"rm\s+-rf\s+/",                # Delete root directory
-    r"rm\s+-rf\s+~",                # Delete home directory
-    r"rm\s+-rf\s+\.\.",             # Delete parent directory
-    r"chmod\s+-R\s+777",            # Set insecure permissions
-    r"dd\s+if=/dev/urandom",        # Potentially destructive disk operations
-    r":\(\)\s*{\s*:\|:&\s*};:",     # Fork bomb pattern
-    r"eval.*\$\(curl",              # Execute code from internet
-    r"wget.*\|\s*bash",             # Execute code from internet
-    r"curl.*\|\s*bash",             # Execute code from internet
-    r".*>\s*/dev/sd[a-z]",          # Write directly to disk device
-    r"rm\s+-rf\s+/\*",              # Delete all files in root
-    r"mkfs\..*\s+/dev/sd[a-z]",     # Format disk
-    r"fdisk\s+/dev/sd[a-z]",        # Partition disk
-    r"dd\s+.*\s+of=/dev/sd[a-z]",   # Low-level disk writing
-    r"shutdown",                    # System shutdown
-    r"reboot",                      # System reboot
-    r"poweroff",                    # System power off
-    r"halt",                        # System halt
+    r"rm\s+-rf\s+[/]+",  # rm -rf / or similar
+    r"dd\s+if=/dev/null\s+of=/dev/",  # Dangerous dd commands
+    r"mkfs",  # Format filesystem commands
+    r"chmod\s+-R\s+777\s+/",  # Recursive permissions on root
+    r">?\s*[/]dev[/]sd[a-z]",  # Direct writes to disk devices
+    r">?\s*[/]proc",  # Direct writes to proc filesystem
+    r">?\s*[/]sys",  # Direct writes to sys filesystem
+    r"curl\s+.*\s*\|\s*bash",  # Pipe curl to bash
+    r"wget\s+.*\s*\|\s*bash",  # Pipe wget to bash
+    r"shutdown",  # System shutdown
+    r"reboot",  # System reboot
+    r"factory[-_]reset",  # Factory reset
+    r"format\s+[a-zA-Z]:",  # Format disk in Windows
 ]
+
+class SecuritySettings(BaseModel):
+    """Security settings for the workflow agent."""
+    
+    # Security validation
+    disable_security_validation: bool = Field(
+        default=False, 
+        description="Disable security validation entirely (DANGEROUS)"
+    )
+    
+    # Script execution security
+    least_privilege_execution: bool = Field(
+        default=True, 
+        description="Execute scripts with minimum necessary privileges"
+    )
+    script_execution_timeout: int = Field(
+        default=600, 
+        description="Script execution timeout in seconds"
+    )
+    allowed_commands: List[str] = Field(
+        default=[], 
+        description="List of allowed commands (if empty, all non-dangerous commands are allowed)"
+    )
+    blocked_commands: List[str] = Field(
+        default=[], 
+        description="List of blocked commands (in addition to dangerous patterns)"
+    )
+    allow_sudo: bool = Field(
+        default=False, 
+        description="Allow sudo commands in scripts"
+    )
+    allow_network_access: bool = Field(
+        default=True, 
+        description="Allow network access during script execution"
+    )
+    
+    # Isolation settings
+    use_docker_isolation: bool = Field(
+        default=False, 
+        description="Use Docker for script isolation"
+    )
+    docker_image: str = Field(
+        default="ubuntu:latest", 
+        description="Docker image to use for isolation"
+    )
+    
+    # Recovery settings
+    enable_recovery: bool = Field(
+        default=True, 
+        description="Enable automatic recovery on failure"
+    )
+    verify_recoveries: bool = Field(
+        default=True, 
+        description="Verify system state after recovery"
+    )
+    
+    @field_validator('script_execution_timeout')
+    @classmethod
+    def validate_timeout(cls, v: int) -> int:
+        """Validate timeout is reasonable."""
+        if v < 10:
+            raise ValueError("Timeout must be at least 10 seconds")
+        return v
+    
+    @field_validator('blocked_commands')
+    @classmethod
+    def validate_blocked_commands(cls, v: List[str]) -> List[str]:
+        """Validate blocked commands don't include essential utilities."""
+        essential_commands = ['ls', 'cd', 'pwd', 'echo', 'cat', 'grep']
+        for cmd in v:
+            if cmd in essential_commands:
+                raise ValueError(f"Cannot block essential command: {cmd}")
+        return v
 
 class WorkflowConfiguration(BaseModel):
     """Configuration for workflow execution."""
     
-    # General settings
-    debug: bool = False
-    log_level: str = "INFO"
-    log_file: Optional[str] = None
+    # Basic settings
+    version: str = Field(default="1.0.0", description="Configuration version")
+    log_level: str = Field(default="INFO", description="Logging level")
+    log_file: Optional[str] = Field(default=None, description="Log file path")
+    
+    # Path settings
+    config_dir: Path = Field(default=Path("./config"), description="Configuration directory")
+    template_dir: Path = Field(default=Path("./templates"), description="Template directory")
+    custom_template_dir: Optional[Path] = Field(default=None, description="Custom template directory")
+    script_dir: Path = Field(default=Path("./generated_scripts"), description="Generated script directory")
+    backup_dir: Path = Field(default=Path("./backup"), description="Backup directory")
+    
+    # Security settings
+    security: SecuritySettings = Field(default_factory=SecuritySettings, description="Security settings")
     
     # Script generation settings
-    script_generator: str = "basic"  # basic, llm, enhanced
-    template_dir: Path = Path("./templates")
-    
-    # LLM settings
-    llm_provider: str = "openai"  # openai, gemini
-    openai_api_key: Optional[str] = None
-    gemini_api_key: Optional[str] = None
+    script_generator: str = Field(default="template", description="Script generator type: template, llm, or enhanced")
+    use_static_analysis: bool = Field(default=True, description="Use static analysis for scripts")
     
     # Execution settings
-    max_retries: int = 3
-    retry_delay: float = 1.0
-    timeout: float = 300.0
+    isolation_method: str = Field(default="direct", description="Script isolation method: direct, docker, or vm")
+    execution_timeout: int = Field(default=300, description="Script execution timeout in seconds")
+    max_retries: int = Field(default=3, description="Maximum retry attempts for operations")
     
-    # Storage settings
-    storage_dir: Path = Path("./storage")
-    knowledge_dir: Path = Path("./knowledge")
-    
-    user_id: str = Field(default="test_user", description="User identifier")
-    custom_template_dir: Optional[Path] = Field(default=None, description="Custom template directory")
-    use_isolation: bool = Field(default=False, description="Whether to use isolation")
-    isolation_method: str = Field(default="direct", description="Isolation method to use")
-    execution_timeout: int = Field(default=300, description="Execution timeout in seconds", ge=1, le=3600)
+    # Verification settings
     skip_verification: bool = Field(default=False, description="Skip verification steps")
-    rule_based_optimization: bool = Field(default=True, description="Use rule-based optimization")
-    use_static_analysis: bool = Field(default=True, description="Use static analysis")
-    db_connection_string: str = Field(default="./workflow_history.db", description="Database connection string")
-    prune_history_days: int = Field(default=90, description="Days to keep history", ge=1)
-    plugin_dirs: List[Path] = Field(default_factory=lambda: [Path("./plugins")], description="Plugin directories")
-    max_concurrent_tasks: int = Field(default=5, description="Maximum concurrent tasks", ge=1, le=100)
-    least_privilege_execution: bool = Field(default=True, description="Use least privilege execution")
-    docs_cache_dir: Optional[Path] = Field(default=Path("./cache/docs"), description="Documentation cache directory")
-    docs_cache_ttl: int = Field(default=86400, description="Documentation cache TTL in seconds", ge=1)
-    use_recovery: bool = Field(default=True, description="Use recovery")
-    verify_rollback: bool = Field(default=True, description="Verify rollback")
-    error_handling: Dict[str, Any] = Field(
-        default_factory=lambda: {
-            "continue_on_error": False,
-            "max_retries": 3,
-            "retry_delay": 5
-        },
-        description="Error handling configuration"
-    )
-
-    @field_validator("isolation_method")
+    verify_rollback: bool = Field(default=True, description="Verify system state after rollback")
+    
+    # Features
+    use_recovery: bool = Field(default=True, description="Enable recovery on failure")
+    use_llm: bool = Field(default=False, description="Use LLM for script enhancement")
+    
+    # Shortcuts for common security settings
+    @property
+    def least_privilege_execution(self) -> bool:
+        """Shortcut for security.least_privilege_execution."""
+        return self.security.least_privilege_execution
+    
+    @property
+    def enable_recovery(self) -> bool:
+        """Shortcut for security.enable_recovery."""
+        return self.security.enable_recovery
+    
+    @field_validator('isolation_method')
     @classmethod
-    def validate_isolation_method(cls, value: str) -> str:
+    def validate_isolation_method(cls, v: str) -> str:
         """Validate isolation method."""
-        valid_methods = {"docker", "chroot", "venv", "direct", "none"}
-        if value.lower() not in valid_methods:
-            raise ValueError(f"Invalid isolation method '{value}'. Must be one of: {valid_methods}")
-        return value.lower()
-
-    @field_validator("log_level")
+        valid_methods = ['direct', 'docker', 'vm']
+        if v not in valid_methods:
+            raise ValueError(f"Invalid isolation method: {v}. Must be one of {valid_methods}")
+        return v
+    
+    @field_validator('script_generator')
     @classmethod
-    def validate_log_level(cls, value: str) -> str:
+    def validate_script_generator(cls, v: str) -> str:
+        """Validate script generator type."""
+        valid_types = ['template', 'llm', 'enhanced']
+        if v not in valid_types:
+            raise ValueError(f"Invalid script generator type: {v}. Must be one of {valid_types}")
+        return v
+    
+    @field_validator('log_level')
+    @classmethod
+    def validate_log_level(cls, v: str) -> str:
         """Validate log level."""
-        valid_levels = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
-        value_upper = value.upper()
-        if value_upper not in valid_levels:
-            raise ValueError(f"Invalid log level '{value}'. Must be one of: {valid_levels}")
-        return value_upper
-
-    @field_validator("template_dir", "custom_template_dir", "docs_cache_dir", "storage_dir", "knowledge_dir")
-    @classmethod
-    def convert_single_path(cls, value: Any) -> Optional[Path]:
-        """Convert single path strings to Path objects."""
-        if value is None:
-            return None
-        if isinstance(value, str):
-            return Path(value).resolve()
-        if isinstance(value, Path):
-            return value.resolve()
-        raise ValueError(f"Invalid path value: {value}")
-
-    @field_validator("plugin_dirs", mode="before")
-    @classmethod
-    def convert_path_list(cls, value: Any) -> List[Path]:
-        """Convert path strings in lists to Path objects."""
-        if not isinstance(value, list):
-            raise ValueError("plugin_dirs must be a list")
-        return [Path(v).resolve() if isinstance(v, (str, Path)) else v for v in value]
-
-    @field_validator("llm_provider")
-    @classmethod
-    def validate_llm_provider(cls, value: str) -> str:
-        """Validate LLM provider."""
-        valid_providers = {"openai", "gemini", "none"}
-        if value.lower() not in valid_providers:
-            raise ValueError(f"Invalid LLM provider '{value}'. Must be one of: {valid_providers}")
-        return value.lower()
-
-    @model_validator(mode="before")
-    @classmethod
-    def resolve_workspace_paths(cls, values: Dict[str, Any]) -> Dict[str, Any]:
-        """Resolve ${WORKSPACE_ROOT} in paths."""
-        workspace_root = os.environ.get("WORKSPACE_ROOT", os.getcwd())
-        
-        processed = {}
-        
-        for key, value in values.items():
-            if isinstance(value, str) and "${WORKSPACE_ROOT}" in value:
-                processed[key] = value.replace("${WORKSPACE_ROOT}", workspace_root)
-            elif isinstance(value, list):
-                processed[key] = [
-                    item.replace("${WORKSPACE_ROOT}", workspace_root) 
-                    if isinstance(item, str) and "${WORKSPACE_ROOT}" in item
-                    else item
-                    for item in value
-                ]
-            else:
-                processed[key] = value
-                
-        return processed
+        valid_levels = ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
+        v = v.upper()
+        if v not in valid_levels:
+            raise ValueError(f"Invalid log level: {v}. Must be one of {valid_levels}")
+        return v
     
-    @model_validator(mode="before")
-    @classmethod
-    def setup_api_keys(cls, values: Dict[str, Any]) -> Dict[str, Any]:
-        """Set up API keys from environment if not provided."""
-        # Set up OpenAI API key
-        if not values.get("openai_api_key"):
-            values["openai_api_key"] = os.environ.get("OPENAI_API_KEY")
-            if not values["openai_api_key"] and values.get("llm_provider") == "openai":
-                logger.warning("No OpenAI API key found in config or environment")
+    @model_validator(mode='after')
+    def validate_paths(self) -> 'WorkflowConfiguration':
+        """Validate and create paths if needed."""
+        # Prepare configuration directory
+        self.config_dir.mkdir(parents=True, exist_ok=True)
         
-        # Set up Gemini API key
-        if not values.get("gemini_api_key"):
-            values["gemini_api_key"] = os.environ.get("GEMINI_API_KEY")
-            if not values["gemini_api_key"] and values.get("llm_provider") == "gemini":
-                logger.warning("No Gemini API key found in config or environment")
+        # Create template directory if it doesn't exist
+        self.template_dir.mkdir(parents=True, exist_ok=True)
         
-        return values
+        # Create script directory if it doesn't exist
+        self.script_dir.mkdir(parents=True, exist_ok=True)
         
-    @model_validator(mode="after")
-    def validate_paths_exist(self) -> 'WorkflowConfiguration':
-        """Validate that specified paths exist and are accessible."""
-        paths_to_check = {
-            "template_dir": self.template_dir,
-            "storage_dir": self.storage_dir,
-            "knowledge_dir": self.knowledge_dir,
-        }
+        # Create backup directory if it doesn't exist
+        self.backup_dir.mkdir(parents=True, exist_ok=True)
         
-        if self.custom_template_dir:
-            paths_to_check["custom_template_dir"] = self.custom_template_dir
+        # Check custom template directory if specified
+        if self.custom_template_dir and not self.custom_template_dir.exists():
+            logger.warning(f"Custom template directory does not exist: {self.custom_template_dir}")
             
-        if self.docs_cache_dir:
-            paths_to_check["docs_cache_dir"] = self.docs_cache_dir
-        
-        for path_name, path in paths_to_check.items():
-            if path is not None:
-                try:
-                    if not path.exists():
-                        path.mkdir(parents=True, exist_ok=True)
-                        logger.info(f"Created directory for {path_name}: {path}")
-                except Exception as e:
-                    logger.warning(f"Failed to create {path_name} directory: {e}")
+        return self
+    
+    @model_validator(mode='after')
+    def validate_docker_settings(self) -> 'WorkflowConfiguration':
+        """Validate Docker settings if Docker isolation is enabled."""
+        if self.isolation_method == 'docker':
+            # Check if Docker image is specified
+            if not self.security.docker_image:
+                raise ValueError("Docker image must be specified when using Docker isolation")
+            
+            # Check if Docker is available
+            try:
+                import shutil
+                if not shutil.which('docker'):
+                    logger.warning("Docker isolation selected but docker command not found")
+            except ImportError:
+                logger.warning("Could not check for docker command")
                 
         return self
     
-    @model_validator(mode="after")
+    @model_validator(mode='after')
+    def validate_script_settings(self) -> 'WorkflowConfiguration':
+        """Validate script generation settings."""
+        if self.script_generator == 'llm' and not self.use_llm:
+            logger.warning("LLM script generation selected but use_llm is False, enabling use_llm")
+            self.use_llm = True
+            
+        return self
+        
+    @model_validator(mode='after')
     def validate_security_settings(self) -> 'WorkflowConfiguration':
-        """Validate security-related configuration settings."""
-        if self.skip_verification and not self.least_privilege_execution:
-            logger.warning("Security risk: Skip verification enabled without least privilege execution")
+        """Validate security settings."""
+        if not self.security.least_privilege_execution:
+            logger.warning("Least privilege execution is disabled, this is potentially dangerous")
             
-        if self.isolation_method == "none" and self.use_isolation:
-            logger.warning("Conflicting settings: isolation_method is 'none' but use_isolation is True")
-            
-        if self.execution_timeout > 3600:
-            logger.warning("Security risk: Long execution timeout may lead to resource exhaustion")
+        if self.security.disable_security_validation:
+            logger.warning("Security validation is disabled, this is EXTREMELY dangerous")
             
         return self
-
-    class Config:
-        """Pydantic configuration."""
-        extra = "allow"  # Allow extra fields
-        validate_assignment = True  # Validate when attributes are assigned
-        arbitrary_types_allowed = True  # Allow arbitrary types (like Path)
-
-
-def ensure_workflow_config(config: Optional[Dict[str, Any]] = None) -> WorkflowConfiguration:
-    """Ensure a valid workflow configuration."""
-    if isinstance(config, WorkflowConfiguration):
-        return config
         
-    # Start with empty config if none provided
-    if config is None:
-        config = {}
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert configuration to dictionary."""
+        return self.model_dump(mode='json')
+    
+    def save(self, path: Optional[str] = None) -> None:
+        """
+        Save configuration to a file.
         
-    # Try to load from default locations
-    default_config = find_default_config() or {}
+        Args:
+            path: Optional path to save to
+        """
+        if not path:
+            path = self.config_dir / "workflow_config.yaml"
+            
+        # Create parent directory if it doesn't exist
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        
+        # Convert to dictionary, handling Path objects
+        config_dict = self.to_dict()
+        
+        # Convert Path objects to strings
+        for key, value in config_dict.items():
+            if isinstance(value, Path):
+                config_dict[key] = str(value)
+                
+        # Write YAML file
+        with open(path, 'w') as f:
+            yaml.dump(config_dict, f, default_flow_style=False)
+            
+        logger.info(f"Configuration saved to {path}")
+
+def load_configuration_from_file(file_path: str) -> Dict[str, Any]:
+    """
+    Load configuration from a file.
     
-    # Merge with default config (default config has lower precedence)
-    merged_config = {**default_config, **config}
-    
-    # Create and validate configuration
+    Args:
+        file_path: Path to configuration file
+        
+    Returns:
+        Configuration dictionary
+        
+    Raises:
+        ConfigurationError: If file not found or invalid format
+    """
     try:
-        return WorkflowConfiguration(**merged_config)
+        with open(file_path, 'r') as f:
+            if file_path.endswith('.yaml') or file_path.endswith('.yml'):
+                return yaml.safe_load(f) or {}
+            elif file_path.endswith('.json'):
+                return json.load(f)
+            else:
+                raise ConfigurationError(f"Unsupported configuration file format: {file_path}")
+    except FileNotFoundError:
+        raise ConfigurationError(f"Configuration file not found: {file_path}")
+    except (yaml.YAMLError, json.JSONDecodeError) as e:
+        raise ConfigurationError(f"Error parsing configuration file: {e}")
+
+def load_configuration_from_env() -> Dict[str, Any]:
+    """
+    Load configuration from environment variables.
+    
+    Environment variables must have the prefix 'WORKFLOW_' to be considered.
+    Nested configuration keys are specified with double underscore,
+    e.g. WORKFLOW_SECURITY__LEAST_PRIVILEGE_EXECUTION.
+    
+    Returns:
+        Configuration dictionary
+    """
+    env_config = {}
+    prefix = 'WORKFLOW_'
+    
+    for key, value in os.environ.items():
+        if key.startswith(prefix):
+            # Remove prefix
+            config_key = key[len(prefix):].lower()
+            
+            # Handle nested keys (e.g. WORKFLOW_SECURITY__LEAST_PRIVILEGE_EXECUTION)
+            if '__' in config_key:
+                parts = config_key.split('__')
+                current = env_config
+                for part in parts[:-1]:
+                    if part not in current:
+                        current[part] = {}
+                    current = current[part]
+                current[parts[-1]] = parse_env_value(value)
+            else:
+                env_config[config_key] = parse_env_value(value)
+                
+    return env_config
+
+def parse_env_value(value: str) -> Any:
+    """
+    Parse environment variable value to appropriate type.
+    
+    Args:
+        value: String value from environment variable
+        
+    Returns:
+        Parsed value (bool, int, float, or string)
+    """
+    # Boolean
+    if value.lower() in ('true', 'yes', '1'):
+        return True
+    elif value.lower() in ('false', 'no', '0'):
+        return False
+    
+    # Try integer
+    try:
+        return int(value)
+    except ValueError:
+        pass
+    
+    # Try float
+    try:
+        return float(value)
+    except ValueError:
+        pass
+    
+    # Default to string
+    return value
+
+def load_configuration(config_file: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Load configuration from file and environment variables.
+    Environment variables override file settings.
+    
+    Args:
+        config_file: Optional configuration file path
+        
+    Returns:
+        Merged configuration dictionary
+    """
+    config = {}
+    
+    # Default configuration file
+    default_config_file = os.path.join(os.getcwd(), 'workflow_config.yaml')
+    
+    # Try to load configuration from file
+    if config_file and os.path.exists(config_file):
+        logger.info(f"Loading configuration from {config_file}")
+        config.update(load_configuration_from_file(config_file))
+    elif os.path.exists(default_config_file):
+        logger.info(f"Loading configuration from {default_config_file}")
+        config.update(load_configuration_from_file(default_config_file))
+    else:
+        logger.info("No configuration file found, using defaults and environment variables")
+    
+    # Load configuration from environment variables
+    env_config = load_configuration_from_env()
+    
+    # Merge environment configuration into file configuration
+    # Environment variables take precedence
+    for key, value in env_config.items():
+        if isinstance(value, dict) and key in config and isinstance(config[key], dict):
+            # Deep merge dictionaries
+            config[key] = {**config[key], **value}
+        else:
+            # Override or add value
+            config[key] = value
+    
+    return config
+
+def ensure_workflow_config(config: Optional[Union[Dict[str, Any], WorkflowConfiguration]] = None) -> WorkflowConfiguration:
+    """
+    Ensure we have a valid WorkflowConfiguration object.
+    
+    Args:
+        config: Optional configuration as dictionary or WorkflowConfiguration
+        
+    Returns:
+        WorkflowConfiguration object
+        
+    Raises:
+        ConfigurationError: If configuration is invalid
+    """
+    try:
+        if isinstance(config, WorkflowConfiguration):
+            return config
+        
+        # Load configuration from file/env if not provided
+        if config is None:
+            config = load_configuration()
+        
+        # Convert to WorkflowConfiguration
+        return WorkflowConfiguration.model_validate(config)
+        
     except Exception as e:
         raise ConfigurationError(f"Invalid configuration: {str(e)}")
 
-
-def find_default_config() -> Optional[Dict[str, Any]]:
-    """
-    Find and load the default configuration file from standard locations.
-    
-    Returns:
-        Configuration dictionary or None if no config file found
-    """
-    search_paths = [
-        Path.cwd() / "workflow_config.yaml",
-        Path.cwd() / "workflow_config.yml",
-        Path.cwd() / "workflow_config.json",
-        Path.home() / ".workflow_agent" / "config.yaml",
-        Path.home() / ".workflow_agent" / "config.json",
-    ]
-    
-    for path in search_paths:
-        try:
-            if path.exists():
-                return load_config_file(str(path))
-        except Exception as e:
-            logger.warning(f"Error loading config from {path}: {e}")
-    
-    logger.info("No configuration file found, using defaults")
-    return None
-
-
-def load_config_file(file_path: str) -> Dict[str, Any]:
-    """
-    Load configuration from a file (YAML or JSON).
-    
-    Args:
-        file_path: Path to the configuration file
-        
-    Returns:
-        Dictionary with configuration
-        
-    Raises:
-        ConfigurationError: If the file is not found or cannot be parsed
-    """
-    path = Path(file_path).expanduser()
-    
-    if not path.exists():
-        raise ConfigurationError(f"Configuration file not found: {file_path}")
-    
-    try:
-        content = path.read_text(encoding='utf-8')
-        
-        if file_path.endswith((".yaml", ".yml")):
-            loaded_config = yaml.safe_load(content) or {}
-        elif file_path.endswith(".json"):
-            loaded_config = json.loads(content) or {}
-        else:
-            raise ConfigurationError(f"Unsupported config file format: {file_path}")
-        
-        logger.debug(f"Loaded configuration from {file_path}")
-        return loaded_config
-        
-    except yaml.YAMLError as e:
-        raise ConfigurationError(f"Invalid YAML format in {file_path}: {str(e)}")
-    except json.JSONDecodeError as e:
-        raise ConfigurationError(f"Invalid JSON format in {file_path}: {str(e)}")
-    except Exception as e:
-        raise ConfigurationError(f"Error reading config file {file_path}: {str(e)}")
-
-
-def merge_configs(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
-    """Merge two configuration dictionaries."""
-    result = base.copy()
-    for key, value in override.items():
-        if isinstance(value, dict) and key in result and isinstance(result[key], dict):
-            result[key] = merge_configs(result[key], value)
-        else:
-            result[key] = value
-    return result
-
-
 def validate_script_security(script_content: str) -> Dict[str, Any]:
     """
-    Validate script content for potentially dangerous operations using multiple methods.
+    Validate script security using pattern matching.
     
     Args:
         script_content: Script content to validate
         
     Returns:
-        Dict with validation results (valid: bool, warnings: list, errors: list)
+        Dictionary with validation results
     """
     warnings = []
     errors = []
     
     # Check for dangerous patterns
     for pattern in DANGEROUS_PATTERNS:
-        if re.search(pattern, script_content, re.IGNORECASE):
-            errors.append(f"Dangerous pattern detected: {pattern}")
+        matches = re.finditer(pattern, script_content, re.IGNORECASE | re.MULTILINE)
+        for match in matches:
+            line_num = script_content[:match.start()].count('\n') + 1
+            matched_text = match.group(0)
+            errors.append(f"Line {line_num}: Dangerous pattern detected: {matched_text}")
     
-    # Check for suspicious commands based on context
-    suspicious_cmds = [
-        r"\bformat\b",
-        r"\bmkfs\b",
-        r"\bfdisk\b",
-        r"wget.*sudo",
-        r"curl.*sudo",
-        r"\bshutdown\b",
-        r"\breboot\b",
-        r"\bservice\s+.*\s+stop\b",
-        r"\bsystemctl\s+stop\b",
-        r"\bkill\s+-9\b",
-        r"\bkillall\b",
-        r"\biptables\s+-F\b"
+    # Check for sudo usage
+    if re.search(r"sudo\s+", script_content, re.MULTILINE):
+        warnings.append("Script uses sudo, which can be dangerous")
+    
+    # Check for running commands from internet
+    if re.search(r"(curl|wget)\s+[^|]*\|\s*(bash|sh)", script_content, re.MULTILINE):
+        errors.append("Script attempts to download and execute code from internet")
+    
+    # Check for rm -rf or deltree with variables (dangerous)
+    if re.search(r"rm\s+-[rf].*\$\{?[a-zA-Z0-9_]+\}?", script_content, re.MULTILINE):
+        warnings.append("Script uses rm -rf with variables, which can be dangerous")
+    
+    # Check for eval or similar
+    if re.search(r"eval\s+[\"\'].*[\$\[]", script_content, re.MULTILINE):
+        warnings.append("Script uses eval with variables, which can be dangerous")
+    
+    # Check for common system commands that should be used carefully
+    system_cmds = [
+        "shutdown", "reboot", "init", "halt",
+        "mkfs", "fdisk", "dd", "mkswap",
+        "mount", "umount"
     ]
     
-    for cmd in suspicious_cmds:
-        if re.search(cmd, script_content, re.IGNORECASE):
-            warnings.append(f"Suspicious command detected: {cmd}")
-    
-    # Check for common syntax errors
-    syntax_errors = [
-        r"if\s+\[\s*[^]]+$",                # Unclosed if statement brackets
-        r"\bfi\b\s*\bfi\b",                 # Double "fi" closure
-        r"\besac\b\s*\besac\b",             # Double "esac" closure
-        r"\bdone\b\s*\bdone\b",             # Double "done" closure
-        r"^\s*}\s*$",                       # Standalone closing brace
-        r"\$\(\(",                          # Missing closing parenthesis in arithmetic expansion
-    ]
-    
-    for error_pattern in syntax_errors:
-        if re.search(error_pattern, script_content, re.MULTILINE):
-            warnings.append(f"Potential syntax error: {error_pattern}")
-    
-    # Try to use shellcheck if available for shell scripts
-    try:
-        if "#!/bin/bash" in script_content or "#!/bin/sh" in script_content:
-            with tempfile.NamedTemporaryFile(suffix=".sh", delete=False) as temp:
-                temp_path = temp.name
-                temp.write(script_content.encode())
-            
-            try:
-                # Run shellcheck to find issues
-                result = subprocess.run(
-                    ["shellcheck", "-f", "json", temp_path],
-                    capture_output=True, text=True, check=False
-                )
-                
-                if result.returncode == 0:
-                    logger.debug("Shellcheck validation passed")
-                else:
-                    try:
-                        shellcheck_output = json.loads(result.stdout)
-                        for issue in shellcheck_output:
-                            level = issue.get("level", "").lower()
-                            message = issue.get("message", "")
-                            
-                            if level == "error":
-                                errors.append(f"Shellcheck error: {message}")
-                            else:
-                                warnings.append(f"Shellcheck warning: {message}")
-                    except json.JSONDecodeError:
-                        warnings.append("Failed to parse shellcheck output")
-            finally:
-                try:
-                    os.unlink(temp_path)
-                except:
-                    pass
-    except FileNotFoundError:
-        logger.warning("Shellcheck not available for additional validation")
-    except Exception as e:
-        logger.warning(f"Shellcheck validation error: {e}")
-    
-    # Validate PowerShell on Windows systems
-    if os.name == 'nt' and ('<#' in script_content or 'function ' in script_content or '$ErrorActionPreference' in script_content):
-        try:
-            with tempfile.NamedTemporaryFile(suffix=".ps1", delete=False) as temp:
-                temp_path = temp.name
-                temp.write(script_content.encode())
-            
-            try:
-                # Check PowerShell syntax
-                result = subprocess.run(
-                    ["powershell", "-Command", f"$ErrorActionPreference='Stop'; $null = [System.Management.Automation.PSParser]::Tokenize((Get-Content -Raw '{temp_path}'), [ref]$null)"],
-                    capture_output=True, text=True, check=False
-                )
-                
-                if result.returncode != 0:
-                    for line in result.stderr.splitlines():
-                        if line.strip():
-                            errors.append(f"PowerShell syntax error: {line.strip()}")
-            finally:
-                try:
-                    os.unlink(temp_path)
-                except:
-                    pass
-        except Exception as e:
-            warnings.append(f"PowerShell validation error: {e}")
-    
-    # Determine overall validity - if there are errors, it's not valid
-    valid = len(errors) == 0
+    for cmd in system_cmds:
+        if re.search(r"\b" + cmd + r"\b", script_content, re.MULTILINE):
+            warnings.append(f"Script uses system command '{cmd}', which should be used carefully")
     
     return {
-        "valid": valid,
+        "valid": len(errors) == 0,
         "warnings": warnings,
         "errors": errors
     }
+
+def sanitize_command(command: str) -> str:
+    """
+    Sanitize a command to prevent command injection.
+    
+    Args:
+        command: Command to sanitize
+        
+    Returns:
+        Sanitized command
+    """
+    # Remove shell special characters
+    sanitized = re.sub(r'[;&|`$]', '', command)
+    
+    # Remove potentially dangerous options
+    sanitized = re.sub(r'\s+-[rf]+\s+/', ' ', sanitized)
+    
+    return sanitized.strip()

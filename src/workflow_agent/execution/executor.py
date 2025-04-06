@@ -6,12 +6,19 @@ import os
 import tempfile
 import asyncio
 import time
+import re
+import json
+import shutil
+import platform
 from pathlib import Path
-from typing import Dict, Any, Optional, List, Union
+from typing import Dict, Any, Optional, List, Union, Tuple
+from datetime import datetime
 
 from ..error.exceptions import ExecutionError, SecurityError
 from ..core.state import WorkflowState, Change, OutputData, WorkflowStatus
 from ..config.configuration import WorkflowConfiguration, validate_script_security
+from ..utils.subprocess_utils import async_secure_shell_execute
+from ..utils.error_handling import async_handle_errors
 from .isolation import IsolationFactory, IsolationStrategy
 
 logger = logging.getLogger(__name__)
@@ -29,6 +36,7 @@ class ScriptExecutor:
         self.config = config
         self._context = {}  # Execution context for integration execution
         
+    @async_handle_errors("Script execution failed")
     async def execute(self, state: WorkflowState) -> WorkflowState:
         """
         Execute a script contained in the workflow state.
@@ -48,42 +56,10 @@ class ScriptExecutor:
             return state.set_error("No script provided for execution")
             
         # Validate script with enhanced security checks
-        security_result = validate_script_security(state.script)
-        has_security_issues = not security_result["valid"]
+        validation_state = await self._validate_script_security(state)
+        if validation_state.has_error:
+            return validation_state
         
-        # Handle warnings
-        for warning in security_result.get("warnings", []):
-            logger.warning(f"Script security warning: {warning}")
-            state = state.add_warning(warning)
-            
-        # Handle errors (more serious than warnings)
-        if security_result.get("errors", []):
-            error_msgs = "\n".join(security_result["errors"])
-            error_msg = f"Script failed security validation with critical issues:\n{error_msgs}"
-            logger.error(error_msg)
-            
-            # If least privilege execution is disabled AND only warnings are present, we can continue
-            # But if there are errors, we must fail regardless of the setting
-            if security_result.get("errors", []) and self.config.least_privilege_execution:
-                raise SecurityError(error_msg)
-            elif security_result.get("errors", []):
-                logger.warning("SECURITY RISK: Executing script despite critical security issues due to disabled least privilege execution")
-                state = state.add_warning("SECURITY RISK: Script contains potentially dangerous operations")
-        
-        # Use enhanced validation from the script validator
-        from ..scripting.validator import ScriptValidator
-        script_validator = ScriptValidator(self.config)
-        validation_result = script_validator.validate(state.script)
-        
-        # Add validation warnings to state
-        for warning in validation_result.get("warnings", []):
-            state = state.add_warning(warning)
-            
-        # If validation fails with errors, abort
-        if validation_result.get("errors", []) and not "valid" in validation_result:
-            error_msgs = "\n".join(validation_result["errors"])
-            raise SecurityError(f"Script validation failed:\n{error_msgs}")
-                
         # Create isolation strategy
         isolation_method = state.isolation_method or self.config.isolation_method
         isolation = IsolationFactory.create(isolation_method, self.config)
@@ -91,46 +67,119 @@ class ScriptExecutor:
         logger.info(f"Executing script with {isolation.get_name()} isolation")
         
         # Mark state as running
-        state = state.mark_running()
+        execution_state = validation_state.mark_running()
         
         try:
             # Execute the script
+            start_time = datetime.now()
             output = await isolation.execute(
-                state.script,
-                state.parameters,
+                execution_state.script,
+                execution_state.parameters,
                 None  # Use default working directory
             )
+            execution_time = (datetime.now() - start_time).total_seconds()
             
             # Update state with execution results
-            state = state.set_output(output)
+            result_state = execution_state.set_output(output)
             
             # Check exit code
             if output.exit_code != 0:
-                logger.error(f"Script execution failed with exit code {output.exit_code}")
-                return state.set_error(f"Script execution failed with exit code {output.exit_code}")
+                error_msg = f"Script execution failed with exit code {output.exit_code}"
+                logger.error(error_msg)
+                if output.stderr:
+                    logger.error(f"Error output: {output.stderr[:500]}")
+                return result_state.set_error(error_msg)
                 
             # Extract and track changes
             changes = self._extract_changes(output.stdout)
+            change_state = result_state
             for change in changes:
-                state = state.add_change(change)
+                change_state = change_state.add_change(change)
                 
             # Update metrics
-            state = state.evolve(
-                metrics=state.metrics.model_copy(update={
-                    "end_time": time.time(),
-                    "duration": output.duration
+            metrics_state = change_state.evolve(
+                metrics=change_state.metrics.model_copy(update={
+                    "end_time": datetime.now(),
+                    "duration": execution_time
                 })
             )
             
             # Mark as completed
-            return state.mark_completed()
+            completed_state = metrics_state.mark_completed()
+            logger.info(f"Script execution completed successfully with {len(changes)} changes tracked")
+            
+            return completed_state
             
         except asyncio.TimeoutError:
-            logger.error("Script execution timed out")
-            return state.set_error("Script execution timed out")
+            error_msg = "Script execution timed out"
+            logger.error(error_msg)
+            return execution_state.set_error(error_msg)
         except Exception as e:
-            logger.error(f"Error during script execution: {e}", exc_info=True)
-            return state.set_error(f"Error during script execution: {str(e)}")
+            error_msg = f"Error during script execution: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            return execution_state.set_error(error_msg)
+    
+    async def _validate_script_security(self, state: WorkflowState) -> WorkflowState:
+        """
+        Validate script security with enhanced checks.
+        
+        Args:
+            state: Current workflow state
+            
+        Returns:
+            Updated state with warnings or errors
+        """
+        # Start with current state
+        current_state = state
+        
+        # Validate script with enhanced security checks
+        security_result = validate_script_security(state.script)
+        
+        # Handle warnings
+        warning_state = current_state
+        for warning in security_result.get("warnings", []):
+            logger.warning(f"Script security warning: {warning}")
+            warning_state = warning_state.add_warning(warning)
+            
+        # Handle errors (more serious than warnings)
+        if security_result.get("errors", []):
+            error_msgs = "\n".join(security_result["errors"])
+            error_msg = f"Script failed security validation with critical issues:\n{error_msgs}"
+            logger.error(error_msg)
+            
+            # If least privilege execution is enabled, fail on any security error
+            if self.config.least_privilege_execution:
+                return warning_state.set_error(error_msg)
+            
+            # Otherwise, add a warning and continue but only for non-critical issues
+            critical_patterns = ["rm -rf /", "format", "shutdown", "reboot"]
+            critical_issue = any(pattern in error_msg.lower() for pattern in critical_patterns)
+            
+            if critical_issue:
+                return warning_state.set_error(
+                    f"Script contains critical security violations that cannot be bypassed: {error_msg}"
+                )
+                
+            logger.warning("SECURITY RISK: Executing script despite security issues due to disabled least privilege execution")
+            return warning_state.add_warning("SECURITY RISK: Script contains potentially dangerous operations")
+        
+        # Use enhanced validation from the script validator
+        from ..scripting.validator import ScriptValidator
+        script_validator = ScriptValidator(self.config)
+        validation_result = script_validator.validate(state.script)
+        
+        # Add validation warnings to state
+        validation_state = warning_state
+        for warning in validation_result.get("warnings", []):
+            validation_state = validation_state.add_warning(warning)
+            
+        # If validation fails with errors, abort
+        if validation_result.get("errors", []) and not validation_result.get("valid", False):
+            error_msgs = "\n".join(validation_result["errors"])
+            return validation_state.set_error(f"Script validation failed:\n{error_msgs}")
+        
+        # If we reach here, script is valid (or warnings were bypassed)
+        return validation_state
             
     def _extract_changes(self, output: str) -> List[Change]:
         """
@@ -144,14 +193,6 @@ class ScriptExecutor:
             List of Change objects
         """
         changes = []
-        
-        # Import needed modules
-        import re
-        import json
-        import os
-        import platform
-        import tempfile
-        from pathlib import Path
         
         # Process JSON change blocks which are the most reliable format
         json_change_blocks = re.findall(r"CHANGE_JSON_BEGIN\s*(.*?)\s*CHANGE_JSON_END", output, re.DOTALL)
@@ -210,6 +251,15 @@ class ScriptExecutor:
             "GROUP_MODIFY": re.compile(r"CHANGE:GROUP_MODIFIED:(\S+)"),
             "GROUP_DELETE": re.compile(r"CHANGE:GROUP_DELETED:(\S+)"),
             
+            # Registry operations (Windows)
+            "REGISTRY_ADD": re.compile(r"CHANGE:REGISTRY_ADDED:(\S+)"),
+            "REGISTRY_MODIFY": re.compile(r"CHANGE:REGISTRY_MODIFIED:(\S+)(?::(\S+))?"),
+            "REGISTRY_DELETE": re.compile(r"CHANGE:REGISTRY_DELETED:(\S+)"),
+            
+            # Database operations
+            "DB_SCHEMA": re.compile(r"CHANGE:DB_SCHEMA:(\S+)(?::(\S+))?"),
+            "DB_DATA": re.compile(r"CHANGE:DB_DATA:(\S+)(?::(\S+))?"),
+            
             # Generic operations
             "GENERIC": re.compile(r"CHANGE:(\w+):(\S+)(?::(.+))?")
         }
@@ -219,16 +269,17 @@ class ScriptExecutor:
             for match in pattern.finditer(output):
                 if change_type == "PACKAGE_INSTALL":
                     package_name = match.group(1)
-                    version = match.group(2) if len(match.groups()) > 1 else None
+                    version = match.group(2) if len(match.groups()) > 1 and match.group(2) else None
                     
                     # Generate platform-specific revert command
-                    revert_cmd = self._generate_package_uninstall_command(package_name)
+                    revert_cmd = self._generate_package_uninstall_command(package_name, version)
                     
                     changes.append(Change(
                         type="package_installed",
                         target=package_name,
                         revertible=True,
-                        revert_command=revert_cmd
+                        revert_command=revert_cmd,
+                        metadata={"version": version} if version else {}
                     ))
                 
                 elif change_type == "FILE_CREATE":
@@ -236,7 +287,7 @@ class ScriptExecutor:
                     
                     # Generate platform-specific revert command
                     is_windows = platform.system() == "Windows"
-                    revert_cmd = f"del {file_path}" if is_windows else f"rm -f {file_path}"
+                    revert_cmd = f"del \"{file_path}\"" if is_windows else f"rm -f \"{file_path}\""
                     
                     changes.append(Change(
                         type="file_created",
@@ -247,18 +298,19 @@ class ScriptExecutor:
                     
                 elif change_type == "FILE_MODIFY":
                     file_path = match.group(1)
-                    backup_path = match.group(2) if len(match.groups()) > 1 else None
+                    backup_path = match.group(2) if len(match.groups()) > 1 and match.group(2) else None
                     
                     revert_cmd = None
                     if backup_path:
                         is_windows = platform.system() == "Windows"
-                        revert_cmd = f"copy {backup_path} {file_path}" if is_windows else f"cp {backup_path} {file_path}"
+                        revert_cmd = f"copy \"{backup_path}\" \"{file_path}\"" if is_windows else f"cp \"{backup_path}\" \"{file_path}\""
                     
                     changes.append(Change(
                         type="file_modified",
                         target=file_path,
                         revertible=backup_path is not None,
-                        revert_command=revert_cmd
+                        revert_command=revert_cmd,
+                        backup_file=backup_path
                     ))
                     
                 elif change_type == "DIR_CREATE":
@@ -266,7 +318,7 @@ class ScriptExecutor:
                     
                     # Generate platform-specific revert command
                     is_windows = platform.system() == "Windows"
-                    revert_cmd = f"rmdir /S /Q {dir_path}" if is_windows else f"rm -rf {dir_path}"
+                    revert_cmd = f"rmdir /S /Q \"{dir_path}\"" if is_windows else f"rm -rf \"{dir_path}\""
                     
                     changes.append(Change(
                         type="directory_created",
@@ -285,15 +337,15 @@ class ScriptExecutor:
                     
                     if operation == "start":
                         is_windows = platform.system() == "Windows"
-                        revert_cmd = f"Stop-Service {service_name}" if is_windows else f"systemctl stop {service_name}"
+                        revert_cmd = f"Stop-Service \"{service_name}\"" if is_windows else f"systemctl stop \"{service_name}\""
                         revertible = True
                     elif operation == "enable":
                         is_windows = platform.system() == "Windows"
-                        revert_cmd = f"Set-Service {service_name} -StartupType Disabled" if is_windows else f"systemctl disable {service_name}"
+                        revert_cmd = f"Set-Service \"{service_name}\" -StartupType Disabled" if is_windows else f"systemctl disable \"{service_name}\""
                         revertible = True
                     elif operation == "install":
                         is_windows = platform.system() == "Windows"
-                        revert_cmd = f"sc delete {service_name}" if is_windows else f"systemctl disable {service_name} && rm -f /etc/systemd/system/{service_name}.service"
+                        revert_cmd = f"sc delete \"{service_name}\"" if is_windows else f"systemctl disable \"{service_name}\" && rm -f /etc/systemd/system/{service_name}.service"
                         revertible = True
                     
                     changes.append(Change(
@@ -305,27 +357,73 @@ class ScriptExecutor:
                     
                 elif change_type == "CONFIG_MODIFY":
                     config_path = match.group(1)
-                    backup_path = match.group(2) if len(match.groups()) > 1 else None
+                    backup_path = match.group(2) if len(match.groups()) > 1 and match.group(2) else None
                     
                     revert_cmd = None
                     if backup_path:
                         is_windows = platform.system() == "Windows"
-                        revert_cmd = f"copy {backup_path} {config_path}" if is_windows else f"cp {backup_path} {config_path}"
+                        revert_cmd = f"copy \"{backup_path}\" \"{config_path}\"" if is_windows else f"cp \"{backup_path}\" \"{config_path}\""
                     
                     changes.append(Change(
                         type="config_modified",
                         target=config_path,
                         revertible=backup_path is not None,
-                        revert_command=revert_cmd
+                        revert_command=revert_cmd,
+                        backup_file=backup_path
                     ))
+                
+                elif change_type.startswith("REGISTRY_"):
+                    reg_path = match.group(1)
+                    backup_path = match.group(2) if len(match.groups()) > 1 and match.group(2) else None
                     
-                elif change_type == "GENERIC":
-                    change_type = match.group(1).lower()
-                    target = match.group(2)
-                    revert_info = match.group(3) if len(match.groups()) > 2 else None
+                    # For registry entries, we should have a backup to revert
+                    revertible = backup_path is not None
+                    revert_cmd = None
+                    
+                    if revertible:
+                        # Use reg.exe to import the backup
+                        revert_cmd = f"reg import \"{backup_path}\""
+                    elif change_type == "REGISTRY_ADD":
+                        # If no backup but it's a new key, we can delete it
+                        revert_cmd = f"reg delete \"{reg_path}\" /f"
+                        revertible = True
                     
                     changes.append(Change(
-                        type=change_type,
+                        type=change_type.lower(),
+                        target=reg_path,
+                        revertible=revertible,
+                        revert_command=revert_cmd,
+                        backup_file=backup_path
+                    ))
+                
+                elif change_type.startswith("DB_"):
+                    db_identifier = match.group(1)
+                    backup_path = match.group(2) if len(match.groups()) > 1 and match.group(2) else None
+                    
+                    # Database changes generally need a backup script to revert
+                    revertible = backup_path is not None
+                    revert_cmd = None
+                    
+                    if revertible:
+                        # The backup should be a SQL script that can be executed to revert changes
+                        # The exact command depends on the database type, which should be in metadata
+                        # For now, just store the backup path
+                        changes.append(Change(
+                            type=change_type.lower(),
+                            target=db_identifier,
+                            revertible=True,
+                            revert_command=None,  # Will be determined during recovery
+                            backup_file=backup_path,
+                            metadata={"db_change_type": change_type.lower()}
+                        ))
+                    
+                elif change_type == "GENERIC":
+                    change_type_str = match.group(1).lower()
+                    target = match.group(2)
+                    revert_info = match.group(3) if len(match.groups()) > 2 and match.group(3) else None
+                    
+                    changes.append(Change(
+                        type=change_type_str,
                         target=target,
                         revertible=revert_info is not None,
                         revert_command=revert_info
@@ -349,7 +447,8 @@ class ScriptExecutor:
                         type="inferred_package_install",
                         target=package_name,
                         revertible=True,
-                        revert_command=self._generate_package_uninstall_command(package_name)
+                        revert_command=self._generate_package_uninstall_command(package_name),
+                        metadata={"inferred": True}
                     ))
             
             # Add a warning about inferred changes
@@ -359,44 +458,113 @@ class ScriptExecutor:
         # Return the collected changes
         return changes
         
-    def _generate_package_uninstall_command(self, package_name: str) -> str:
-        """Generate a platform-specific package uninstall command."""
+    def _generate_package_uninstall_command(self, package_name: str, version: Optional[str] = None) -> str:
+        """
+        Generate a platform-specific package uninstall command.
+        
+        Args:
+            package_name: Name of the package to uninstall
+            version: Optional version of the package
+            
+        Returns:
+            Command to uninstall the package
+        """
         is_windows = platform.system() == "Windows"
         
         if is_windows:
             # Windows uninstall approach (can be PowerShell or cmd)
             if re.search(r"\.(msi|exe)$", package_name, re.IGNORECASE):
                 # MSI or EXE installer
-                return f"Start-Process -Wait -FilePath \"msiexec.exe\" -ArgumentList \"/x {package_name} /quiet\""
+                return f"Start-Process -Wait -FilePath \"msiexec.exe\" -ArgumentList \"/x \"{package_name}\" /quiet\""
             elif package_name.lower().startswith("chocolatey:"):
                 # Chocolatey package
-                return f"choco uninstall {package_name.split(':')[1]} -y"
+                package = package_name.split(':', 1)[1]
+                return f"choco uninstall {package} -y"
+            elif package_name.lower().startswith("winget:"):
+                # WinGet package
+                package = package_name.split(':', 1)[1]
+                return f"winget uninstall {package} --silent"
             else:
-                # Generic Windows uninstall attempt
-                return f"$app = Get-WmiObject -Class Win32_Product | Where-Object {{ $_.Name -like \"*{package_name}*\" }}; if ($app) {{ $app.Uninstall() }}"
+                # Try both common package managers and WMI
+                return f"""
+try {{
+    # Try chocolatey first
+    if (Get-Command choco -ErrorAction SilentlyContinue) {{
+        choco uninstall {package_name} -y
+        Write-Output "Uninstalled package with Chocolatey: {package_name}"
+        exit 0
+    }}
+    # Then try winget
+    if (Get-Command winget -ErrorAction SilentlyContinue) {{
+        winget uninstall {package_name} --silent
+        Write-Output "Uninstalled package with Winget: {package_name}"
+        exit 0
+    }}
+    # Fall back to WMI
+    $app = Get-WmiObject -Class Win32_Product | Where-Object {{ $_.Name -like "*{package_name}*" }}
+    if ($app) {{
+        $app.Uninstall()
+        Write-Output "Uninstalled package with WMI: {package_name}"
+        exit 0
+    }}
+    Write-Warning "No installation found for {package_name}"
+}} catch {{
+    Write-Error "Failed to uninstall {package_name}: $_"
+    exit 1
+}}
+"""
         else:
-            # Linux uninstall approach
+            # Linux uninstall approach with better handling of different formats
             if package_name.lower().startswith("pip:"):
                 # Python package
-                return f"pip uninstall -y {package_name.split(':')[1]}"
+                package = package_name.split(':', 1)[1]
+                return f"pip uninstall -y {package}"
             elif package_name.lower().startswith("npm:"):
                 # Node.js package
-                return f"npm uninstall -g {package_name.split(':')[1]}"
+                package = package_name.split(':', 1)[1]
+                return f"npm uninstall -g {package}"
+            elif package_name.lower().startswith("apt:"):
+                # Debian/Ubuntu package
+                package = package_name.split(':', 1)[1]
+                return f"apt-get remove -y {package}"
+            elif package_name.lower().startswith("yum:") or package_name.lower().startswith("dnf:"):
+                # Red Hat/CentOS/Fedora package
+                package = package_name.split(':', 1)[1]
+                return f"if command -v dnf > /dev/null; then dnf remove -y {package}; else yum remove -y {package}; fi"
+            elif package_name.lower().startswith("snap:"):
+                # Snap package
+                package = package_name.split(':', 1)[1]
+                return f"snap remove {package}"
             else:
                 # Try different package managers
                 return f"""
-if command -v apt-get > /dev/null; then
-    apt-get remove -y {package_name}
-elif command -v yum > /dev/null; then
-    yum remove -y {package_name}
-elif command -v dnf > /dev/null; then
-    dnf remove -y {package_name}
-elif command -v zypper > /dev/null; then
-    zypper remove -y {package_name}
-else
-    echo "Unknown package manager for uninstalling {package_name}"
-    exit 1
+# Universal package removal script
+if command -v apt-get > /dev/null 2>&1; then
+    apt-get remove -y {package_name} && echo "Uninstalled package with apt-get: {package_name}" && exit 0
 fi
+
+if command -v dnf > /dev/null 2>&1; then
+    dnf remove -y {package_name} && echo "Uninstalled package with dnf: {package_name}" && exit 0
+fi
+
+if command -v yum > /dev/null 2>&1; then
+    yum remove -y {package_name} && echo "Uninstalled package with yum: {package_name}" && exit 0
+fi
+
+if command -v snap > /dev/null 2>&1 && snap list | grep -q "^{package_name} "; then
+    snap remove {package_name} && echo "Uninstalled package with snap: {package_name}" && exit 0
+fi
+
+if command -v zypper > /dev/null 2>&1; then
+    zypper remove -y {package_name} && echo "Uninstalled package with zypper: {package_name}" && exit 0
+fi
+
+if command -v pacman > /dev/null 2>&1; then
+    pacman -R --noconfirm {package_name} && echo "Uninstalled package with pacman: {package_name}" && exit 0
+fi
+
+echo "No package manager found for uninstalling {package_name}" >&2
+exit 1
 """
     
     def _process_change_item(self, item: Dict[str, Any], changes_list: List[Change]) -> None:
@@ -412,18 +580,28 @@ fi
             return
             
         try:
+            # Extract change data with proper defaults
+            change_type = item["type"]
+            target = item["target"]
+            revertible = item.get("revertible", False)
+            revert_command = item.get("revert_command")
+            backup_file = item.get("backup_file")
+            metadata = item.get("metadata", {})
+            
             # Convert dictionary to Change object
             change = Change(
-                type=item["type"],
-                target=item["target"],
-                revertible=item.get("revertible", False),
-                revert_command=item.get("revert_command")
+                type=change_type,
+                target=target,
+                revertible=revertible,
+                revert_command=revert_command,
+                backup_file=backup_file,
+                metadata=metadata
             )
             changes_list.append(change)
         except Exception as e:
             logger.error(f"Error processing change item: {e}")
             
-    # Integration Execution Methods (merged from integration_executor.py)
+    # Integration Execution Methods
     
     async def execute_integration(self, integration: Any, action: str, params: Dict[str, Any]) -> Dict[str, Any]:
         """
