@@ -1,0 +1,47 @@
+#!/bin/bash
+set -e
+
+# Import common macros
+{% include 'macros/common.sh.j2' %}
+
+{{ log_message('INFO', 'Starting removal of ' + target_name) }}
+
+# Backup configuration if needed
+{% if template_data.backup_config %}
+{{ backup_file(template_data.config_path) }}
+{% endif %}
+
+# Platform-specific removal
+{% if system_context.platform.system == 'win32' %}
+# Windows removal
+{% if template_data.windows_uninstall %}
+{{ template_data.windows_uninstall }}
+{% else %}
+powershell -Command "Write-Host 'Removing {{ target_name }}...'"
+{% endif %}
+{% else %}
+# Unix/Linux removal
+{% if template_data.unix_uninstall %}
+{{ template_data.unix_uninstall }}
+{% else %}
+if command -v apt-get &> /dev/null; then
+    apt-get remove -y {{ target_name }}
+elif command -v yum &> /dev/null; then
+    yum remove -y {{ target_name }}
+elif command -v brew &> /dev/null; then
+    brew uninstall {{ target_name }}
+else
+    {{ handle_error('Package manager not found') }}
+fi
+{% endif %}
+{% endif %}
+
+# Cleanup
+{{ cleanup() }}
+
+# Verify removal
+if command -v {{ target_name }} &> /dev/null; then
+    {{ handle_error(target_name + ' is still present in the system') }}
+else
+    {{ log_message('INFO', target_name + ' has been successfully removed') }}
+fi

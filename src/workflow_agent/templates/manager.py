@@ -49,10 +49,10 @@ class TemplateManager:
         if self.config.template_dir and self.config.template_dir.exists():
             dirs.append(self.config.template_dir)
             
-        # Integration-specific templates
-        integrations_templates = Path(__file__).parent.parent / "integrations" / "common_templates"
-        if integrations_templates.exists():
-            dirs.append(integrations_templates)
+        # Common templates
+        common_templates = self.config.template_dir / "common"
+        if common_templates.exists():
+            dirs.append(common_templates)
             
         # Default templates are last
         default_templates = Path(__file__).parent / "default_templates"

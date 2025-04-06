@@ -36,9 +36,9 @@ class IntegrationManager:
         
     def _discover_built_in_integrations(self) -> None:
         """Discover and register built-in integrations."""
-        from . import infra_agent, custom, knowledge, multi_agent, rollback, strategy
+        from . import infra_agent, custom
         
-        modules = [infra_agent, custom, knowledge, multi_agent, rollback, strategy]
+        modules = [infra_agent, custom]
         for module in modules:
             # Attempt to get the module's integrations
             if hasattr(module, 'get_integrations'):

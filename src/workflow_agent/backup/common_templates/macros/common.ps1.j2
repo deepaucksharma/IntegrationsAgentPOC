@@ -1,0 +1,110 @@
+# Common PowerShell macros for error handling and logging
+
+function log_message {
+    param(
+        [string]$level,
+        [string]$message
+    )
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    $logMessage = "$timestamp [$level] $message"
+    Write-Host $logMessage
+    Add-Content -Path $LOG_FILE -Value $logMessage
+}
+
+function handle_error {
+    param(
+        [string]$message
+    )
+    log_message "ERROR" $message
+    throw $message
+}
+
+function check_prerequisites {
+    param(
+        [string[]]$required_tools
+    )
+    foreach ($tool in $required_tools) {
+        if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) {
+            handle_error "Required tool not found: $tool"
+        }
+    }
+}
+
+{% macro setup_logging() %}
+function Write-Log {
+    param(
+        [string]$Level,
+        [string]$Message
+    )
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    Write-Host "[$timestamp] $Level - $Message"
+}
+
+function Write-Info {
+    param([string]$Message)
+    Write-Log -Level "INFO" -Message $Message
+}
+
+function Write-Error {
+    param([string]$Message)
+    Write-Log -Level "ERROR" -Message $Message
+    throw $Message
+}
+{% endmacro %}
+
+{% macro error_handling() %}
+trap {
+    Write-Error "An error occurred: $_"
+    exit 1
+}
+{% endmacro %}
+
+{% macro check_prerequisites() %}
+# Check if running as administrator
+$isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+if (-not $isAdmin) {
+    Write-Error "This script must be run as Administrator"
+    exit 1
+}
+{% endmacro %}
+
+# Common PowerShell functions for integration scripts
+
+{% macro log_message(level, message) %}
+Write-Host "[$([datetime]::Now.ToString('yyyy-MM-dd HH:mm:ss'))] [{{ level }}] {{ message }}"
+{% endmacro %}
+
+{% macro handle_error(message) %}
+Write-Host "[$([datetime]::Now.ToString('yyyy-MM-dd HH:mm:ss'))] [ERROR] {{ message }}"
+exit 1
+{% endmacro %}
+
+{% macro check_command(cmd) %}
+if (-not (Get-Command {{ cmd }} -ErrorAction SilentlyContinue)) {
+    {{ handle_error('Required command not found: ' + cmd) }}
+}
+{% endmacro %}
+
+{% macro check_file(path) %}
+if (-not (Test-Path "{{ path }}" -PathType Leaf)) {
+    {{ handle_error('Required file not found: ' + path) }}
+}
+{% endmacro %}
+
+{% macro check_directory(path) %}
+if (-not (Test-Path "{{ path }}" -PathType Container)) {
+    {{ handle_error('Required directory not found: ' + path) }}
+}
+{% endmacro %}
+
+{% macro backup_file(path) %}
+if (Test-Path "{{ path }}" -PathType Leaf) {
+    Copy-Item "{{ path }}" "{{ path }}.bak.$([datetime]::Now.ToString('yyyyMMdd_HHmmss'))"
+}
+{% endmacro %}
+
+{% macro restore_file(path) %}
+if (Test-Path "{{ path }}.bak" -PathType Leaf) {
+    Move-Item "{{ path }}.bak" "{{ path }}" -Force
+}
+{% endmacro %} 

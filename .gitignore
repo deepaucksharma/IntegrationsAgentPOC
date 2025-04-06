@@ -38,9 +38,16 @@ venv.bak/
 
 # Project specific
 *.log
+*.log.*
 workflow_history.db
 generated_scripts/
 custom_config*.yaml
+storage/
+cache/
+
+# Backup files
+*.bak
+*~
 
 # Exclude sensitive files that might contain API keys
 dev_keys.yaml

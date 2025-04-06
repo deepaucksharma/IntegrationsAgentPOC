@@ -46,6 +46,18 @@ class IntegrationError(WorkflowError):
     """Error in integration operations."""
     pass
 
+class IntegrationConfigError(IntegrationError):
+    """Configuration error in integration."""
+    pass
+
+class IntegrationValidationError(IntegrationError):
+    """Validation error in integration."""
+    pass
+
+class IntegrationExecutionError(IntegrationError):
+    """Execution error in integration."""
+    pass
+
 class DocumentationFetchError(WorkflowError):
     """Error fetching documentation."""
     pass

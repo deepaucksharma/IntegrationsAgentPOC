@@ -7,7 +7,7 @@ setup(
     package_dir={"": "src"},
     install_requires=[
         "pyyaml>=6.0",
-        "pydantic>=2.0",
+        "pydantic>=2.0.0,<3.0.0",
         "jinja2>=3.0",
         "aiohttp>=3.8",
         "python-dotenv>=1.0"

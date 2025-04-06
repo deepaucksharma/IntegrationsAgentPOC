@@ -1,0 +1,12 @@
+verification:
+  steps:
+    - name: "Check directory exists"
+      command: "test -d /opt/monitoring"
+      
+    - name: "Check config file"
+      command: "test -f /opt/monitoring/config.yaml"
+      
+    - name: "Verify configuration"
+      command: |
+        grep "license_key: {{ parameters.license_key }}" /opt/monitoring/config.yaml
+        grep "host: {{ parameters.host }}" /opt/monitoring/config.yaml 

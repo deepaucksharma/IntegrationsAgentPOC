@@ -1,6 +1,4 @@
-"""
-Documentation components for workflow agent.
-"""
-from .parser import DocumentationParser
+"""Documentation module."""
+from .handler import DocumentationHandler
 
-__all__ = ["DocumentationParser"]
+__all__ = ['DocumentationHandler']
