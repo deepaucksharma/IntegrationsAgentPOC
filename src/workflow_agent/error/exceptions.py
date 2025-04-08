@@ -103,3 +103,15 @@ class LLMError(WorkflowError):
 class ScriptError(WorkflowError):
     """Error in script generation or validation."""
     pass
+
+class NetworkError(WorkflowError):
+    """Error in network operations or connectivity."""
+    pass
+
+class AuthenticationError(SecurityError):
+    """Error in authentication."""
+    pass
+
+class TimeoutError(WorkflowError):
+    """Error due to operation timeout."""
+    pass

@@ -15,10 +15,24 @@ from .exceptions import (
     IntegrationError,
     DocumentationFetchError,
     VerificationError,
-    LLMError
+    LLMError,
+    NetworkError,
+    AuthenticationError,
+    TimeoutError,
+    ResourceError
+)
+
+from .handler import (
+    ErrorHandler,
+    ErrorCategory,
+    handle_safely,
+    handle_safely_async,
+    retry,
+    async_retry
 )
 
 __all__ = [
+    # Exceptions
     'WorkflowError',
     'ConfigurationError',
     'ValidationError',
@@ -32,5 +46,17 @@ __all__ = [
     'IntegrationError',
     'DocumentationFetchError',
     'VerificationError',
-    'LLMError'
+    'LLMError',
+    'NetworkError',
+    'AuthenticationError',
+    'TimeoutError',
+    'ResourceError',
+    
+    # Error handling utilities
+    'ErrorHandler',
+    'ErrorCategory',
+    'handle_safely',
+    'handle_safely_async',
+    'retry',
+    'async_retry'
 ]

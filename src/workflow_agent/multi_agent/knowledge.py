@@ -12,6 +12,7 @@ from typing import Dict, Any, Optional, List, Union
 import hashlib
 import time
 
+from ..core.agents.base_agent import BaseAgent
 from ..core.message_bus import MessageBus
 from ..core.state import WorkflowState
 from ..storage.knowledge_base import KnowledgeBase
@@ -19,7 +20,7 @@ from ..llm.service import LLMService, LLMProvider
 
 logger = logging.getLogger(__name__)
 
-class KnowledgeAgent:
+class KnowledgeAgent(BaseAgent):
     """
     LLM-enhanced agent responsible for retrieving, analyzing, and understanding integration documentation.
     """
@@ -31,7 +32,7 @@ class KnowledgeAgent:
         llm_service: Optional[LLMService] = None,
         config: Optional[Dict[str, Any]] = None
     ):
-        self.message_bus = message_bus
+        super().__init__(message_bus, "KnowledgeAgent")
         self.knowledge_base = knowledge_base or KnowledgeBase()
         self.llm_service = llm_service or LLMService()
         self.config = config or {}
@@ -46,15 +47,17 @@ class KnowledgeAgent:
         
         # Cache for parsed documentation
         self.parsed_docs_cache = {}
+        
+        # Register message handlers
+        self.register_handler("retrieve_knowledge", self._handle_retrieve_knowledge)
+        self.register_handler("query_knowledge", self._handle_query_knowledge)
+        self.register_handler("analyze_documentation", self._handle_analyze_documentation)
+        self.register_handler("extract_parameters", self._handle_extract_parameters)
     
     async def initialize(self) -> None:
         """Initialize the knowledge agent with enhanced document understanding."""
-        # Subscribe to message bus topics
-        logger.info("Initializing KnowledgeAgent with LLM-driven document understanding...")
-        await self.message_bus.subscribe("retrieve_knowledge", self._handle_retrieve_knowledge)
-        await self.message_bus.subscribe("query_knowledge", self._handle_query_knowledge)
-        await self.message_bus.subscribe("analyze_documentation", self._handle_analyze_documentation)
-        await self.message_bus.subscribe("extract_parameters", self._handle_extract_parameters)
+        # Initialize base agent
+        await super().initialize()
         
         # Initialize knowledge base
         await self.knowledge_base.initialize()
@@ -345,13 +348,16 @@ class KnowledgeAgent:
             enhanced_docs = await self._enhance_documentation_with_llm(docs, state)
             
             # 4. Update state with enhanced documentation
-            state.template_data = enhanced_docs.get("definition", {})
-            state.parameter_schema = enhanced_docs.get("parameters", {})
-            state.verification_data = enhanced_docs.get("verification", {})
+            state_dict = state.model_dump()
+            state_dict["template_data"] = enhanced_docs.get("definition", {})
+            state_dict["parameter_schema"] = enhanced_docs.get("parameters", {})
+            state_dict["verification_data"] = enhanced_docs.get("verification", {})
             
             # 5. Add reasoning about knowledge for the coordinator
             knowledge_reasoning = await self._generate_knowledge_reasoning(state, enhanced_docs)
-            state.knowledge_reasoning = knowledge_reasoning
+            state_dict["knowledge_reasoning"] = knowledge_reasoning
+            
+            state = WorkflowState(**state_dict)
             
             # 6. Identify template path (but LLM will generate if needed)
             action_map = {
@@ -371,7 +377,9 @@ class KnowledgeAgent:
             template_found = False
             for template_path in template_paths:
                 if template_path.exists():
-                    state.template_path = str(template_path)
+                    state_dict = state.model_dump()
+                    state_dict["template_path"] = str(template_path)
+                    state = WorkflowState(**state_dict)
                     template_found = True
                     break
             
@@ -382,7 +390,7 @@ class KnowledgeAgent:
             logger.info(f"[KnowledgeAgent] Knowledge retrieval and enhancement complete for {state.integration_type}/{state.target_name}")
             
             # Publish the updated state
-            await self.message_bus.publish("knowledge_retrieved", {
+            await self.publish("knowledge_retrieved", {
                 "workflow_id": workflow_id,
                 "state": state.model_dump(),
                 "knowledge_found": bool(docs),
@@ -391,7 +399,7 @@ class KnowledgeAgent:
             
         except Exception as e:
             logger.error(f"Error retrieving knowledge: {str(e)}", exc_info=True)
-            await self.message_bus.publish("error", {
+            await self.publish("error", {
                 "workflow_id": workflow_id,
                 "error": f"Error retrieving knowledge: {str(e)}"
             })
@@ -661,7 +669,7 @@ class KnowledgeAgent:
         context = message.get("context", {})
         
         if not query:
-            await self.message_bus.publish("query_response", {
+            await self.publish("query_response", {
                 "workflow_id": workflow_id,
                 "error": "No query provided",
                 "result": None
@@ -686,14 +694,14 @@ class KnowledgeAgent:
             query_result = await self._process_knowledge_query(query, docs, context)
             
             # Send response
-            await self.message_bus.publish("query_response", {
+            await self.publish("query_response", {
                 "workflow_id": workflow_id,
                 "result": query_result
             })
             
         except Exception as e:
             logger.error(f"Error processing knowledge query: {e}")
-            await self.message_bus.publish("query_response", {
+            await self.publish("query_response", {
                 "workflow_id": workflow_id,
                 "error": f"Error processing query: {str(e)}",
                 "result": None
@@ -764,7 +772,7 @@ class KnowledgeAgent:
         doc_content = message.get("content")
         
         if not integration_type or not doc_content:
-            await self.message_bus.publish("documentation_analysis", {
+            await self.publish("documentation_analysis", {
                 "workflow_id": workflow_id,
                 "error": "Missing integration_type or content",
                 "result": None
@@ -788,14 +796,14 @@ class KnowledgeAgent:
                 analysis = {"error": "Unsupported content type"}
             
             # Send response
-            await self.message_bus.publish("documentation_analysis", {
+            await self.publish("documentation_analysis", {
                 "workflow_id": workflow_id,
                 "result": analysis
             })
             
         except Exception as e:
             logger.error(f"Error analyzing documentation: {e}")
-            await self.message_bus.publish("documentation_analysis", {
+            await self.publish("documentation_analysis", {
                 "workflow_id": workflow_id,
                 "error": f"Error analyzing documentation: {str(e)}",
                 "result": None
@@ -812,7 +820,7 @@ class KnowledgeAgent:
         provided_params = message.get("parameters", {})
         
         if not integration_type:
-            await self.message_bus.publish("parameter_extraction", {
+            await self.publish("parameter_extraction", {
                 "workflow_id": workflow_id,
                 "error": "Missing integration_type",
                 "result": None
@@ -836,14 +844,14 @@ class KnowledgeAgent:
             params_result = await self._analyze_parameters(integration_type, param_definitions, provided_params)
             
             # Send response
-            await self.message_bus.publish("parameter_extraction", {
+            await self.publish("parameter_extraction", {
                 "workflow_id": workflow_id,
                 "result": params_result
             })
             
         except Exception as e:
             logger.error(f"Error extracting parameters: {e}")
-            await self.message_bus.publish("parameter_extraction", {
+            await self.publish("parameter_extraction", {
                 "workflow_id": workflow_id,
                 "error": f"Error extracting parameters: {str(e)}",
                 "result": None
@@ -907,3 +915,10 @@ class KnowledgeAgent:
                 "complete_parameters": provided_params,
                 "undefined_parameters": [] if not param_definitions else list(provided_params.keys())
             }
+            
+    async def cleanup(self) -> None:
+        """Clean up resources."""
+        # Clear cache to release memory
+        self.parsed_docs_cache.clear()
+        await super().cleanup()
+        logger.info("KnowledgeAgent cleanup complete")

@@ -7,12 +7,18 @@ import os
 import json
 import asyncio
 from enum import Enum
-from typing import Dict, Any, Optional, List, Union, Callable
+from typing import Dict, Any, Optional, List, Union, Callable, Type
 from datetime import datetime
 import hashlib
 import time
 import re
 from pathlib import Path
+
+from .providers.base_provider import BaseLLMProvider
+from .providers.openai_provider import OpenAIProvider
+from .providers.gemini_provider import GeminiProvider
+from .providers.anthropic_provider import AnthropicProvider
+from .providers.mock_provider import MockProvider
 
 logger = logging.getLogger(__name__)
 
@@ -163,10 +169,6 @@ class LLMService:
         self.cache_dir = Path(self.config.get("cache_dir", "cache"))
         self.cache_dir.mkdir(exist_ok=True)
         
-        self.openai_client = None
-        self.gemini_model = None
-        self.anthropic_client = None
-        
         # Default provider settings
         self.default_provider = LLMProvider(self.config.get("default_provider", "gemini"))
         
@@ -188,53 +190,71 @@ class LLMService:
             }
         }
         
-        # Initialize clients
-        self._initialize_clients()
+        # Provider instances
+        self.providers: Dict[LLMProvider, BaseLLMProvider] = {}
+        
+        # Initialize providers
+        self._initialize_providers()
         
         logger.info(f"LLM service initialized with default provider: {self.default_provider}")
     
-    def _initialize_clients(self):
-        """Initialize clients for each LLM provider."""
-        # Initialize OpenAI if available
+    def _initialize_providers(self):
+        """Initialize providers based on configuration."""
+        # Configure OpenAI provider
         if self.default_provider == LLMProvider.OPENAI or self.config.get("initialize_all", False):
-            api_key = self.config.get("openai_api_key") or os.environ.get("OPENAI_API_KEY")
-            if api_key:
+            openai_config = {
+                "api_key": self.config.get("openai_api_key") or os.environ.get("OPENAI_API_KEY"),
+                "default_model": self.model_configs[LLMProvider.OPENAI]["default"]
+            }
+            if openai_config["api_key"]:
                 try:
-                    import openai
-                    self.openai_client = openai.AsyncOpenAI(api_key=api_key)
-                    logger.info("OpenAI client initialized")
-                except ImportError:
-                    logger.warning("OpenAI package not installed. OpenAI provider unavailable.")
+                    self.providers[LLMProvider.OPENAI] = OpenAIProvider(openai_config)
+                    logger.info("OpenAI provider initialized")
                 except Exception as e:
-                    logger.error(f"Failed to initialize OpenAI client: {e}")
-        
-        # Initialize Gemini if available
+                    logger.error(f"Failed to initialize OpenAI provider: {e}")
+                    
+        # Configure Gemini provider
         if self.default_provider == LLMProvider.GEMINI or self.config.get("initialize_all", False):
-            api_key = self.config.get("gemini_api_key") or os.environ.get("GEMINI_API_KEY")
-            if api_key:
+            gemini_config = {
+                "api_key": self.config.get("gemini_api_key") or os.environ.get("GEMINI_API_KEY"),
+                "default_model": self.model_configs[LLMProvider.GEMINI]["default"]
+            }
+            if gemini_config["api_key"]:
                 try:
-                    import google.generativeai as genai
-                    genai.configure(api_key=api_key)
-                    model_name = self.model_configs[LLMProvider.GEMINI]["default"]
-                    self.gemini_model = genai.GenerativeModel(model_name)
-                    logger.info(f"Gemini model initialized: {model_name}")
-                except ImportError:
-                    logger.warning("Google Generative AI package not installed. Gemini provider unavailable.")
+                    self.providers[LLMProvider.GEMINI] = GeminiProvider(gemini_config)
+                    logger.info("Gemini provider initialized")
                 except Exception as e:
-                    logger.error(f"Failed to initialize Gemini model: {e}")
-        
-        # Initialize Anthropic if available
+                    logger.error(f"Failed to initialize Gemini provider: {e}")
+                    
+        # Configure Anthropic provider
         if self.default_provider == LLMProvider.ANTHROPIC or self.config.get("initialize_all", False):
-            api_key = self.config.get("anthropic_api_key") or os.environ.get("ANTHROPIC_API_KEY")
-            if api_key:
+            anthropic_config = {
+                "api_key": self.config.get("anthropic_api_key") or os.environ.get("ANTHROPIC_API_KEY"),
+                "default_model": self.model_configs[LLMProvider.ANTHROPIC]["default"]
+            }
+            if anthropic_config["api_key"]:
                 try:
-                    import anthropic
-                    self.anthropic_client = anthropic.AsyncAnthropic(api_key=api_key)
-                    logger.info("Anthropic client initialized")
-                except ImportError:
-                    logger.warning("Anthropic package not installed. Anthropic provider unavailable.")
+                    self.providers[LLMProvider.ANTHROPIC] = AnthropicProvider(anthropic_config)
+                    logger.info("Anthropic provider initialized")
                 except Exception as e:
-                    logger.error(f"Failed to initialize Anthropic client: {e}")
+                    logger.error(f"Failed to initialize Anthropic provider: {e}")
+                    
+        # Always initialize mock provider
+        self.providers[LLMProvider.MOCK] = MockProvider()
+        logger.info("Mock provider initialized")
+    
+    def _get_provider(self, provider_name: LLMProvider) -> BaseLLMProvider:
+        """Get provider instance, falling back to default or mock if needed."""
+        if provider_name in self.providers:
+            return self.providers[provider_name]
+        
+        if self.default_provider in self.providers:
+            logger.warning(f"Provider {provider_name} not found, using default {self.default_provider}")
+            return self.providers[self.default_provider]
+        
+        # Final fallback to mock
+        logger.warning(f"Default provider {self.default_provider} not found, using mock")
+        return self.providers[LLMProvider.MOCK]
     
     async def generate(
         self,
@@ -337,14 +357,48 @@ class LLMService:
             context=context,
         )
         
-        # Generate response
-        response = await self._generate_response(request, use_cache)
+        # Get provider
+        provider_instance = self._get_provider(request.provider)
         
-        # Parse response as JSON
-        json_response = response.to_json()
+        # Check cache
+        cache_key = request.get_cache_key()
+        cache_hit = False
+        cached_response = None
         
-        # Save interaction
-        await self._save_interaction(request, response)
+        if use_cache and cache_key in self.cache:
+            logger.debug(f"Using cached JSON response for {cache_key}")
+            cached_response = self.cache[cache_key]
+            cache_hit = True
+            json_response = cached_response.to_json()
+        else:
+            # Generate JSON directly using provider
+            start_time = time.time()
+            try:
+                json_response = await provider_instance.generate_json(
+                    prompt=request.prompt,
+                    system_prompt=request.system_prompt,
+                )
+                
+                # Create response object
+                content = json.dumps(json_response)
+                response = LLMResponse(
+                    content=content,
+                    request_id=request.request_id,
+                    model=model or provider_instance.default_model,
+                    provider=request.provider,
+                    latency_ms=int((time.time() - start_time) * 1000)
+                )
+                
+                # Cache response
+                if use_cache:
+                    self.cache[cache_key] = response
+                    
+                # Save interaction
+                await self._save_interaction(request, response)
+                
+            except Exception as e:
+                logger.error(f"Error generating JSON: {e}")
+                return {"error": str(e)}
         
         return json_response
     
@@ -392,14 +446,47 @@ class LLMService:
             context=context,
         )
         
-        # Generate response
-        response = await self._generate_response(request, use_cache)
+        # Get provider
+        provider_instance = self._get_provider(request.provider)
         
-        # Extract code from response
-        code = response.extract_code()
+        # Check cache
+        cache_key = request.get_cache_key()
+        cache_hit = False
         
-        # Save interaction
-        await self._save_interaction(request, response)
+        if use_cache and cache_key in self.cache:
+            logger.debug(f"Using cached code response for {cache_key}")
+            cached_response = self.cache[cache_key]
+            cache_hit = True
+            code = cached_response.extract_code()
+        else:
+            # Generate code directly using provider
+            start_time = time.time()
+            try:
+                code = await provider_instance.generate_code(
+                    prompt=request.prompt,
+                    system_prompt=request.system_prompt,
+                    language=language
+                )
+                
+                # Create response object
+                response = LLMResponse(
+                    content=f"```{language}\n{code}\n```",
+                    request_id=request.request_id,
+                    model=model or provider_instance.default_model,
+                    provider=request.provider,
+                    latency_ms=int((time.time() - start_time) * 1000)
+                )
+                
+                # Cache response
+                if use_cache:
+                    self.cache[cache_key] = response
+                    
+                # Save interaction
+                await self._save_interaction(request, response)
+                
+            except Exception as e:
+                logger.error(f"Error generating code: {e}")
+                return f"# Error generating {language} code: {e}"
         
         return code
     
@@ -425,19 +512,34 @@ class LLMService:
         
         start_time = time.time()
         
-        # Select appropriate provider
-        if request.provider == LLMProvider.OPENAI:
-            response = await self._generate_openai(request)
-        elif request.provider == LLMProvider.GEMINI:
-            response = await self._generate_gemini(request)
-        elif request.provider == LLMProvider.ANTHROPIC:
-            response = await self._generate_anthropic(request)
-        elif request.provider == LLMProvider.MOCK:
-            response = await self._generate_mock(request)
-        else:
-            # Default to Gemini
-            response = await self._generate_gemini(request)
+        # Get provider instance
+        provider_instance = self._get_provider(request.provider)
         
+        try:
+            # Generate text using provider
+            content = await provider_instance.generate_text(
+                prompt=request.prompt,
+                system_prompt=request.system_prompt
+            )
+            
+            # Create response object
+            response = LLMResponse(
+                content=content,
+                request_id=request.request_id,
+                model=request.model or provider_instance.default_model,
+                provider=request.provider
+            )
+            
+        except Exception as e:
+            logger.error(f"Error generating with {request.provider}: {e}")
+            response = LLMResponse(
+                content="",
+                request_id=request.request_id,
+                model="unknown",
+                provider=request.provider,
+                error=str(e)
+            )
+            
         end_time = time.time()
         latency_ms = int((end_time - start_time) * 1000)
         
@@ -449,191 +551,6 @@ class LLMService:
             self.cache[cache_key] = response
         
         return response
-    
-    async def _generate_openai(self, request: LLMRequest) -> LLMResponse:
-        """Generate response using OpenAI."""
-        if not self.openai_client:
-            logger.error("OpenAI client not initialized")
-            return LLMResponse(
-                content="",
-                request_id=request.request_id,
-                model="unknown",
-                provider=LLMProvider.OPENAI,
-                error="OpenAI client not initialized"
-            )
-        
-        try:
-            # Determine model
-            model = request.model or self.model_configs[LLMProvider.OPENAI]["default"]
-            
-            # Prepare messages
-            messages = []
-            if request.system_prompt:
-                messages.append({"role": "system", "content": request.system_prompt})
-            messages.append({"role": "user", "content": request.prompt})
-            
-            # Handle response format
-            response_format = None
-            if request.response_format == LLMResponseFormat.JSON:
-                response_format = {"type": "json_object"}
-            
-            # Generate response
-            response = await self.openai_client.chat.completions.create(
-                model=model,
-                messages=messages,
-                temperature=request.temperature,
-                max_tokens=request.max_tokens,
-                response_format=response_format,
-                stream=request.stream
-            )
-            
-            # Extract content and metadata
-            content = response.choices[0].message.content
-            tokens_used = response.usage.total_tokens if hasattr(response, "usage") else None
-            
-            return LLMResponse(
-                content=content,
-                request_id=request.request_id,
-                model=model,
-                provider=LLMProvider.OPENAI,
-                tokens_used=tokens_used
-            )
-            
-        except Exception as e:
-            logger.error(f"Error generating with OpenAI: {e}")
-            return LLMResponse(
-                content="",
-                request_id=request.request_id,
-                model="unknown",
-                provider=LLMProvider.OPENAI,
-                error=str(e)
-            )
-    
-    async def _generate_gemini(self, request: LLMRequest) -> LLMResponse:
-        """Generate response using Google Gemini."""
-        import google.generativeai as genai
-        
-        if not self.gemini_model:
-            logger.error("Gemini model not initialized")
-            return LLMResponse(
-                content="",
-                request_id=request.request_id,
-                model="unknown",
-                provider=LLMProvider.GEMINI,
-                error="Gemini model not initialized"
-            )
-        
-        try:
-            # Determine model
-            model_name = request.model or self.model_configs[LLMProvider.GEMINI]["default"]
-            
-            # Recreate model if different from current
-            if not hasattr(self.gemini_model, "model_name") or self.gemini_model.model_name != model_name:
-                self.gemini_model = genai.GenerativeModel(model_name)
-            
-            # Prepare content
-            if request.system_prompt:
-                chat = self.gemini_model.start_chat(history=[
-                    {"role": "user", "parts": [request.system_prompt]},
-                    {"role": "model", "parts": ["I'll follow these instructions."]}
-                ])
-                response = chat.send_message(request.prompt)
-            else:
-                response = self.gemini_model.generate_content(request.prompt)
-            
-            # Extract content
-            if hasattr(response, "text"):
-                content = response.text
-            else:
-                content = response.parts[0].text if hasattr(response, "parts") and response.parts else ""
-            
-            return LLMResponse(
-                content=content,
-                request_id=request.request_id,
-                model=model_name,
-                provider=LLMProvider.GEMINI
-            )
-            
-        except Exception as e:
-            logger.error(f"Error generating with Gemini: {e}")
-            return LLMResponse(
-                content="",
-                request_id=request.request_id,
-                model="unknown",
-                provider=LLMProvider.GEMINI,
-                error=str(e)
-            )
-    
-    async def _generate_anthropic(self, request: LLMRequest) -> LLMResponse:
-        """Generate response using Anthropic Claude."""
-        if not self.anthropic_client:
-            logger.error("Anthropic client not initialized")
-            return LLMResponse(
-                content="",
-                request_id=request.request_id,
-                model="unknown",
-                provider=LLMProvider.ANTHROPIC,
-                error="Anthropic client not initialized"
-            )
-        
-        try:
-            # Determine model
-            model = request.model or self.model_configs[LLMProvider.ANTHROPIC]["default"]
-            
-            # Prepare system and prompt
-            system = request.system_prompt or ""
-            
-            # Generate response
-            response = await self.anthropic_client.messages.create(
-                model=model,
-                system=system,
-                messages=[{"role": "user", "content": request.prompt}],
-                temperature=request.temperature,
-                max_tokens=request.max_tokens or 1024
-            )
-            
-            # Extract content
-            content = response.content[0].text
-            
-            return LLMResponse(
-                content=content,
-                request_id=request.request_id,
-                model=model,
-                provider=LLMProvider.ANTHROPIC
-            )
-            
-        except Exception as e:
-            logger.error(f"Error generating with Anthropic: {e}")
-            return LLMResponse(
-                content="",
-                request_id=request.request_id,
-                model="unknown",
-                provider=LLMProvider.ANTHROPIC,
-                error=str(e)
-            )
-    
-    async def _generate_mock(self, request: LLMRequest) -> LLMResponse:
-        """Generate mock response for testing."""
-        logger.info("Generating mock response")
-        
-        # Simulate latency
-        await asyncio.sleep(0.5)
-        
-        # Generate different responses based on request type
-        if request.response_format == LLMResponseFormat.JSON:
-            content = '{"status": "success", "message": "This is a mock response", "data": {"foo": "bar"}}'
-        elif request.response_format == LLMResponseFormat.CODE:
-            content = "#!/bin/bash\necho 'This is a mock script'\nexit 0"
-        else:
-            content = f"This is a mock response to: {request.prompt[:50]}..."
-        
-        return LLMResponse(
-            content=content,
-            request_id=request.request_id,
-            model="mock-model",
-            provider=LLMProvider.MOCK,
-            tokens_used=len(content.split())
-        )
     
     async def _save_interaction(self, request: LLMRequest, response: LLMResponse) -> None:
         """Save the interaction to the cache directory for audit and reuse."""

@@ -10,27 +10,31 @@ import os
 import asyncio
 import tempfile
 
+from ..core.agents.base_agent import BaseAgent
 from ..core.message_bus import MessageBus
 from ..core.state import WorkflowState
 from ..storage.knowledge_base import KnowledgeBase
 
 logger = logging.getLogger(__name__)
 
-class ImprovementAgent:
+class ImprovementAgent(BaseAgent):
     """
     Agent responsible for analyzing failures and generating improvements.
     """
     
     def __init__(self, message_bus: MessageBus, knowledge_base: Optional[KnowledgeBase] = None):
-        self.message_bus = message_bus
+        super().__init__(message_bus, "ImprovementAgent")
         self.knowledge_base = knowledge_base or KnowledgeBase()
         self.learning_data = {}
         self.learning_path = None
+        
+        # Register message handlers
+        self.register_handler("analyze_failure", self._handle_analyze_failure)
+        self.register_handler("workflow_complete", self._handle_workflow_complete)
     
     async def initialize(self) -> None:
         """Initialize the improvement agent."""
-        await self.message_bus.subscribe("analyze_failure", self._handle_analyze_failure)
-        await self.message_bus.subscribe("workflow_complete", self._handle_workflow_complete)
+        await super().initialize()
         
         try:
             storage_dir = os.path.join(os.path.dirname(__file__), "..", "storage")
@@ -42,6 +46,7 @@ class ImprovementAgent:
             logger.warning(f"Using temporary learning path: {self.learning_path}")
             
         await self._load_learning_data()
+        logger.info("ImprovementAgent initialization complete")
     
     async def _load_learning_data(self) -> None:
         """Load existing learning data."""
@@ -97,21 +102,21 @@ class ImprovementAgent:
                 })
                 await self._apply_improvement(state, improvement)
                 await self._save_learning_data()
-                await self.message_bus.publish("improvement_generated", {
+                await self.publish("improvement_generated", {
                     "workflow_id": workflow_id,
-                    "state": state.dict(),
+                    "state": state.model_dump(),
                     "root_cause": root_cause,
                     "improvement": improvement
                 })
             else:
-                await self.message_bus.publish("improvement_failed", {
+                await self.publish("improvement_failed", {
                     "workflow_id": workflow_id,
                     "root_cause": root_cause
                 })
                 await self._save_learning_data()
         except Exception as e:
             logger.error(f"Error analyzing failure: {e}")
-            await self.message_bus.publish("error", {
+            await self.publish("error", {
                 "workflow_id": workflow_id,
                 "error": f"Error analyzing failure: {str(e)}"
             })
@@ -365,3 +370,9 @@ retry_command() {
         )
         if improvement["type"] == "script_improvement" and "improved_script" in improvement:
             logger.info(f"Would update template for {state.integration_type}/{state.target_name} with {improvement['description']}")
+            
+    async def cleanup(self) -> None:
+        """Clean up resources and save learning data."""
+        await self._save_learning_data()
+        await super().cleanup()
+        logger.info("ImprovementAgent cleanup complete")

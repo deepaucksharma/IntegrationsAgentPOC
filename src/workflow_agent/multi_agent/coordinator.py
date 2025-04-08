@@ -6,6 +6,7 @@ import logging
 import uuid
 from typing import Dict, Any, Optional, List
 
+from ..core.agents.base_agent import BaseAgent
 from ..core.state import WorkflowState
 from ..core.message_bus import MessageBus
 from ..utils.system import get_system_context
@@ -13,28 +14,24 @@ from ..error.exceptions import WorkflowError
 
 logger = logging.getLogger(__name__)
 
-class CoordinatorAgent:
+class CoordinatorAgent(BaseAgent):
     """
     Coordinates all agents and manages workflow execution.
     """
     
     def __init__(self, message_bus: MessageBus):
-        self.message_bus = message_bus
+        super().__init__(message_bus, "CoordinatorAgent")
         self.active_workflows = {}
         self._workflow_events = {}
         self._lock = asyncio.Lock()
-    
-    async def initialize(self) -> None:
-        """Initialize and subscribe to relevant topics."""
-        logger.info("Initializing CoordinatorAgent...")
-        logger.debug("Subscribing to message bus topics...")
-        await self.message_bus.subscribe("knowledge_retrieved", self._handle_knowledge_retrieved)
-        await self.message_bus.subscribe("script_generated", self._handle_script_generated)
-        await self.message_bus.subscribe("script_validated", self._handle_script_validated)
-        await self.message_bus.subscribe("execution_complete", self._handle_execution_complete)
-        await self.message_bus.subscribe("verification_complete", self._handle_verification_complete)
-        await self.message_bus.subscribe("error", self._handle_error)
-        logger.info("CoordinatorAgent initialization complete")
+        
+        # Register message handlers
+        self.register_handler("knowledge_retrieved", self._handle_knowledge_retrieved)
+        self.register_handler("script_generated", self._handle_script_generated)
+        self.register_handler("script_validated", self._handle_script_validated)
+        self.register_handler("execution_complete", self._handle_execution_complete)
+        self.register_handler("verification_complete", self._handle_verification_complete)
+        self.register_handler("error", self._handle_error)
     
     async def start_workflow(self, input_state: Dict[str, Any] | WorkflowState, config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Start a new workflow based on the input state."""
@@ -51,15 +48,17 @@ class CoordinatorAgent:
                 state = input_state
                 if not state.transaction_id:
                     logger.debug("Setting workflow_id as transaction_id in state")
-                    state_dict = state.dict()
+                    state_dict = state.model_dump()
                     state_dict["transaction_id"] = workflow_id
                     state = WorkflowState(**state_dict)
                 
             if not state.system_context:
                 logger.debug("Adding system context to state")
-                state.system_context = get_system_context()
+                state_dict = state.model_dump()
+                state_dict["system_context"] = get_system_context()
+                state = WorkflowState(**state_dict)
             
-            logger.debug("Workflow state initialized: %s", state.dict())
+            logger.debug("Workflow state initialized: %s", state.model_dump())
             
         except Exception as e:
             logger.error("Failed to initialize workflow state: %s", e, exc_info=True)
@@ -100,7 +99,7 @@ class CoordinatorAgent:
             async with self._lock:
                 if workflow_id in self.active_workflows:
                     workflow = self.active_workflows[workflow_id]
-                    return workflow.get("state", {}).dict()
+                    return workflow.get("state", {}).model_dump()
                 return {"error": f"Workflow {workflow_id} result not found"}
         except asyncio.TimeoutError:
             return {"error": f"Workflow {workflow_id} timed out after {timeout} seconds"}
@@ -144,44 +143,44 @@ class CoordinatorAgent:
         logger.info(f"[Coordinator] Executing step: {current_step} for workflow {workflow_id}")
         try:
             if current_step == "retrieve_knowledge":
-                await self.message_bus.publish("retrieve_knowledge", {
+                await self.publish("retrieve_knowledge", {
                     "workflow_id": workflow_id,
-                    "state": state.dict(),
+                    "state": state.model_dump(),
                     "config": config
                 })
             elif current_step == "generate_script":
-                await self.message_bus.publish("generate_script", {
+                await self.publish("generate_script", {
                     "workflow_id": workflow_id,
-                    "state": state.dict(),
+                    "state": state.model_dump(),
                     "config": config
                 })
             elif current_step == "validate_script":
-                await self.message_bus.publish("validate_script", {
+                await self.publish("validate_script", {
                     "workflow_id": workflow_id,
-                    "state": state.dict(),
+                    "state": state.model_dump(),
                     "config": config
                 })
             elif current_step == "execute_script":
-                await self.message_bus.publish("execute_script", {
+                await self.publish("execute_script", {
                     "workflow_id": workflow_id,
-                    "state": state.dict(),
+                    "state": state.model_dump(),
                     "config": config
                 })
             elif current_step in ["verify_result", "verify_removal", "verify_standalone"]:
-                await self.message_bus.publish("verify_result", {
+                await self.publish("verify_result", {
                     "workflow_id": workflow_id,
-                    "state": state.dict(),
+                    "state": state.model_dump(),
                     "config": config,
                     "verification_type": current_step
                 })
             else:
-                await self.message_bus.publish("error", {
+                await self.publish("error", {
                     "workflow_id": workflow_id,
                     "error": f"Unknown step: {current_step}"
                 })
         except Exception as e:
             logger.exception(f"Error executing step {current_step}: {e}")
-            await self.message_bus.publish("error", {
+            await self.publish("error", {
                 "workflow_id": workflow_id,
                 "error": f"Error in {current_step}: {str(e)}"
             })
@@ -277,7 +276,7 @@ class CoordinatorAgent:
                 workflow["state"] = WorkflowState(**message["state"])
             if workflow["state"].error:
                 should_analyze_failure = True
-                workflow_state = workflow["state"].dict()
+                workflow_state = workflow["state"].model_dump()
                 workflow_config = workflow["config"]
                 workflow["status"] = "failed"
             else:
@@ -287,7 +286,7 @@ class CoordinatorAgent:
         
         # Publish analyze_failure outside the lock
         if should_analyze_failure:
-            await self.message_bus.publish("analyze_failure", {
+            await self.publish("analyze_failure", {
                 "workflow_id": workflow_id,
                 "state": workflow_state,
                 "config": workflow_config,
@@ -311,14 +310,26 @@ class CoordinatorAgent:
             workflow = self.active_workflows[workflow_id]
             workflow["status"] = "failed"
             if "state" in workflow:
-                workflow["state"].error = error
-                workflow_state = workflow["state"].dict()
+                state_dict = workflow["state"].model_dump()
+                state_dict["error"] = error
+                workflow["state"] = WorkflowState(**state_dict)
+                workflow_state = state_dict
                 workflow_config = workflow["config"]
         
         # Publish analyze_failure outside the lock
-        await self.message_bus.publish("analyze_failure", {
+        await self.publish("analyze_failure", {
             "workflow_id": workflow_id,
             "state": workflow_state,
             "config": workflow_config,
             "error": error
         })
+        
+    async def cleanup(self) -> None:
+        """Clean up resources and unsubscribe from topics."""
+        await super().cleanup()
+        # Notify any waiting workflows
+        async with self._lock:
+            for workflow_id, event in self._workflow_events.items():
+                if not event.is_set():
+                    logger.warning(f"Setting event for incomplete workflow {workflow_id} during cleanup")
+                    event.set()
