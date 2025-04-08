@@ -562,7 +562,11 @@ def install(
     integration: str,
     license_key: str = typer.Option(..., help="License key for the integration"),
     host: str = typer.Option("localhost", help="Target host for installation"),
-    config_file: Optional[str] = typer.Option(None, help="Path to configuration file")
+    config_file: Optional[str] = typer.Option(None, help="Path to configuration file"),
+    install_dir: str = typer.Option("./InfraAgent", help="Installation directory path"),
+    config_path: str = typer.Option("./InfraAgent/config", help="Configuration directory path"),
+    log_path: str = typer.Option("./InfraAgent/logs", help="Log directory path"),
+    port: int = typer.Option(8080, help="Port number for the integration")
 ):
     """Install an integration."""
     try:
@@ -573,7 +577,11 @@ def install(
             integration_type=integration,
             parameters={
                 "license_key": license_key,
-                "host": host
+                "host": host,
+                "install_dir": install_dir,
+                "config_path": config_path,
+                "log_path": log_path,
+                "port": port
             },
             system_context=get_system_context(),
             template_data={}
@@ -605,7 +613,11 @@ def install(
 def verify(
     integration: str,
     host: str = typer.Option("localhost", help="Target host for verification"),
-    config_file: Optional[str] = typer.Option(None, help="Path to configuration file")
+    config_file: Optional[str] = typer.Option(None, help="Path to configuration file"),
+    install_dir: str = typer.Option("./InfraAgent", help="Installation directory path"),
+    config_path: str = typer.Option("./InfraAgent/config", help="Configuration directory path"),
+    log_path: str = typer.Option("./InfraAgent/logs", help="Log directory path"),
+    port: int = typer.Option(8080, help="Port number for the integration")
 ):
     """Verify an integration installation."""
     try:
@@ -614,7 +626,13 @@ def verify(
             action="verify",
             target_name=f"{integration}-integration",
             integration_type=integration,
-            parameters={"host": host},
+            parameters={
+                "host": host,
+                "install_dir": install_dir,
+                "config_path": config_path,
+                "log_path": log_path,
+                "port": port
+            },
             system_context=get_system_context(),
             template_data={}
         )
@@ -645,7 +663,11 @@ def verify(
 def remove(
     integration: str,
     host: str = typer.Option("localhost", help="Target host for removal"),
-    config_file: Optional[str] = typer.Option(None, help="Path to configuration file")
+    config_file: Optional[str] = typer.Option(None, help="Path to configuration file"),
+    install_dir: str = typer.Option("./InfraAgent", help="Installation directory path"),
+    config_path: str = typer.Option("./InfraAgent/config", help="Configuration directory path"),
+    log_path: str = typer.Option("./InfraAgent/logs", help="Log directory path"),
+    port: int = typer.Option(8080, help="Port number for the integration")
 ):
     """Remove an integration."""
     try:
@@ -654,7 +676,13 @@ def remove(
             action="uninstall",
             target_name=f"{integration}-integration",
             integration_type=integration,
-            parameters={"host": host},
+            parameters={
+                "host": host,
+                "install_dir": install_dir,
+                "config_path": config_path,
+                "log_path": log_path,
+                "port": port
+            },
             system_context=get_system_context(),
             template_data={}
         )

@@ -3,6 +3,7 @@ Script generation for integration actions.
 """
 import logging
 import os
+import platform
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Union
 
@@ -114,11 +115,36 @@ class ScriptGenerator:
             Template key or None if not found
         """
         # Try several options in order of specificity
-        options = [
-            f"{state.action}/{state.integration_type}/{state.target_name}",
-            f"{state.action}/{state.integration_type}/default",
-            f"{state.action}/default"
-        ]
+        options = []
+        
+        # Check if we're on Windows to prefer PowerShell
+        is_windows = "windows" in state.system_context.get("platform", "").lower() if isinstance(state.system_context.get("platform", ""), str) else False
+        if not is_windows and "win" in platform.system().lower():
+            is_windows = True
+        
+        # Add extension options based on platform
+        if is_windows:
+            # Windows - prefer PowerShell scripts
+            options = [
+                f"{state.action}/{state.integration_type}/{state.target_name}.ps1",
+                f"{state.action}/{state.integration_type}/{state.target_name}",
+                f"{state.action}/{state.integration_type}.ps1",
+                f"{state.action}/{state.integration_type}/default.ps1",
+                f"{state.action}/{state.integration_type}/default",
+                f"{state.action}/default.ps1",
+                f"{state.action}/default",
+            ]
+        else:
+            # Linux/Mac - prefer shell scripts
+            options = [
+                f"{state.action}/{state.integration_type}/{state.target_name}.sh",
+                f"{state.action}/{state.integration_type}/{state.target_name}",
+                f"{state.action}/{state.integration_type}.sh",
+                f"{state.action}/{state.integration_type}/default.sh",
+                f"{state.action}/{state.integration_type}/default",
+                f"{state.action}/default.sh",
+                f"{state.action}/default"
+            ]
         
         # Check on-disk templates
         for option in options:
@@ -161,15 +187,17 @@ class ScriptGenerator:
         Returns:
             Template context dictionary
         """
+        # Create a baseline context with key information
         context = {
             "action": state.action,
             "target_name": state.target_name,
             "integration_type": state.integration_type,
             "execution_id": state.execution_id,
-            "system_context": state.system_context
+            "system_context": state.system_context,
+            "parameters": state.parameters  # Add parameters as a nested object
         }
         
-        # Add parameters
+        # Add parameters directly to support both direct access and nested access
         if state.parameters:
             context.update(state.parameters)
             
@@ -177,4 +205,12 @@ class ScriptGenerator:
         if state.template_data:
             context.update(state.template_data)
             
+        # Make sure all templates have access to default directory parameters
+        if "install_dir" not in context and "parameters" in context:
+            context["install_dir"] = context["parameters"].get("install_dir", "")
+        if "config_path" not in context and "parameters" in context:
+            context["config_path"] = context["parameters"].get("config_path", "")
+        if "log_path" not in context and "parameters" in context:
+            context["log_path"] = context["parameters"].get("log_path", "")
+        
         return context

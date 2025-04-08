@@ -58,6 +58,7 @@ src/workflow_agent/knowledge/integration.py
 src/workflow_agent/llm/__init__.py
 src/workflow_agent/llm/enhancer.py
 src/workflow_agent/llm/script_generator.py
+src/workflow_agent/llm/service.py
 src/workflow_agent/llm/template_engine.py
 src/workflow_agent/multi_agent/__init__.py
 src/workflow_agent/multi_agent/coordinator.py
@@ -100,6 +101,7 @@ src/workflow_agent/verification/__init__.py
 src/workflow_agent/verification/direct.py
 src/workflow_agent/verification/dynamic.py
 src/workflow_agent/verification/integration_verification.py
+src/workflow_agent/verification/llm_verifier.py
 src/workflow_agent/verification/manager.py
 src/workflow_agent/verification/platform_verifier.py
 src/workflow_agent/verification/runner.py

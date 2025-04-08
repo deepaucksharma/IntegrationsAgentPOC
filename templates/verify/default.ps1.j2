@@ -1,45 +1,71 @@
-# PowerShell verification script for {{ target_name }}
-# Generated on {{ timestamp }}
+# Infrastructure Agent Verification Template
+# This is the default PowerShell template for verifications
 
+# Error handling
 $ErrorActionPreference = "Stop"
 trap { Write-Error $_; exit 1 }
 
-Write-Host "Starting {{ action }} of {{ target_name }} ({{ integration_type }})"
+# Output information
+Write-Host "Verifying {{ target_name }}"
+Write-Host "Integration type: {{ integration_type }}"
+Write-Host "Host: {{ host }}"
 
-# Display parameters
-Write-Host "Parameters:"
-{% for key, value in parameters.items() %}
-Write-Host "  - {{ key }}: {{ value }}"
-{% endfor %}
+# Set default values for parameters
+$InstallDir = "{{ install_dir | default('.\InfraAgent') }}"
+$ConfigPath = "{{ config_path | default('.\InfraAgent\config') }}"
+$LogPath = "{{ log_path | default('.\InfraAgent\logs') }}"
 
-# Verification steps
-Write-Host "Verifying {{ target_name }} installation..."
+# Check if directories exist
+$success = $true
 
-{% if parameters.install_dir %}
-if (-not (Test-Path "{{ parameters.install_dir }}")) {
-    Write-Error "Installation directory does not exist: {{ parameters.install_dir }}"
-    exit 1
-} else {
-    Write-Host "Installation directory exists: {{ parameters.install_dir }}"
+if (-Not (Test-Path -Path $InstallDir)) {
+    Write-Host "ERROR: Installation directory does not exist: $InstallDir"
+    $success = $false
 }
-{% endif %}
 
-{% if parameters.host and parameters.port %}
-Write-Host "Checking connectivity to {{ parameters.host }}:{{ parameters.port }}..."
-try {
-    $connection = New-Object System.Net.Sockets.TcpClient("{{ parameters.host }}", {{ parameters.port }})
-    if ($connection.Connected) {
-        Write-Host "Connection to {{ parameters.host }}:{{ parameters.port }} successful"
-        $connection.Close()
-    } else {
-        Write-Warning "Connection to {{ parameters.host }}:{{ parameters.port }} failed"
+if (-Not (Test-Path -Path $ConfigPath)) {
+    Write-Host "ERROR: Configuration directory does not exist: $ConfigPath"
+    $success = $false
+}
+
+if (-Not (Test-Path -Path "$ConfigPath\config.json")) {
+    Write-Host "ERROR: Configuration file does not exist: $ConfigPath\config.json"
+    $success = $false
+}
+
+if (-Not (Test-Path -Path $LogPath)) {
+    Write-Host "ERROR: Log directory does not exist: $LogPath"
+    $success = $false
+}
+
+# Check configuration file
+if (Test-Path -Path "$ConfigPath\config.json") {
+    try {
+        $config = Get-Content -Path "$ConfigPath\config.json" -Raw | ConvertFrom-Json
+        Write-Host "Configuration file contains valid JSON"
+        
+        # Check license key
+        if (-Not $config.license_key) {
+            Write-Host "ERROR: License key not found in configuration"
+            $success = $false
+        }
+        
+        # Check host
+        if (-Not $config.host) {
+            Write-Host "ERROR: Host not found in configuration"
+            $success = $false
+        }
+    } 
+    catch {
+        Write-Host "ERROR: Unable to parse configuration file: $_"
+        $success = $false
     }
-} catch {
-    Write-Warning "Connection to {{ parameters.host }}:{{ parameters.port }} failed: $_"
 }
-{% endif %}
 
-# Final verification result
-Write-Host "{{ target_name }} verification completed successfully"
-
-exit 0
+if ($success) {
+    Write-Host "Verification completed successfully"
+    exit 0
+} else {
+    Write-Host "Verification failed"
+    exit 1
+}

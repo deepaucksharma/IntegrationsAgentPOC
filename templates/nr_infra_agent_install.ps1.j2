@@ -1,0 +1,78 @@
+# New Relic Infrastructure Agent Installation Script
+# Generated on {{ timestamp }}
+# Based on New Relic documentation
+
+# Set error handling
+$ErrorActionPreference = "Stop"
+trap { Write-Error $_; exit 1 }
+
+Write-Host "Starting installation of {{ target_name }} ({{ integration_type }})"
+
+# Display parameters
+Write-Host "Parameters:"
+{% for key, value in parameters.items() %}
+Write-Host "  - {{ key }}: {{ value }}"
+{% endfor %}
+
+# Create required directories
+$installDir = "{{ parameters.install_dir }}"
+$configPath = "{{ parameters.config_path }}"
+$logPath = "{{ parameters.log_path }}"
+
+Write-Host "Creating installation directories..."
+if (-not (Test-Path $installDir)) {
+    New-Item -ItemType Directory -Force -Path $installDir | Out-Null
+    Write-Host "Created installation directory: $installDir"
+} else {
+    Write-Host "Installation directory already exists: $installDir"
+}
+
+if (-not (Test-Path $configPath)) {
+    New-Item -ItemType Directory -Force -Path $configPath | Out-Null
+    Write-Host "Created configuration directory: $configPath"
+} else {
+    Write-Host "Configuration directory already exists: $configPath"
+}
+
+if (-not (Test-Path $logPath)) {
+    New-Item -ItemType Directory -Force -Path $logPath | Out-Null
+    Write-Host "Created log directory: $logPath"
+} else {
+    Write-Host "Log directory already exists: $logPath"
+}
+
+# Create configuration file
+Write-Host "Creating configuration file..."
+$config = @{
+    "license_key" = "{{ parameters.license_key }}"
+    "host" = "{{ parameters.host }}"
+    "port" = "{{ parameters.port }}"
+    "log_level" = "INFO"
+    "log_file" = Join-Path $logPath "infra_agent.log"
+}
+
+$configJson = $config | ConvertTo-Json
+$configFile = Join-Path $configPath "config.json"
+Set-Content -Path $configFile -Value $configJson
+
+Write-Host "Configuration file created: $configFile"
+
+# Simulate downloading and installing the agent
+Write-Host "Downloading and installing the agent..."
+# In a real script, this would download and install the agent package
+# For simulation purposes, we'll just create a placeholder file
+$agentPlaceholder = Join-Path $installDir "infra_agent.exe"
+Set-Content -Path $agentPlaceholder -Value "New Relic Infrastructure Agent"
+
+# Simulate registering the service
+Write-Host "Registering the New Relic Infrastructure Agent service..."
+# In a real script, this would register and start the service
+# For simulation purposes, we'll just create a placeholder file
+$servicePlaceholder = Join-Path $installDir "service_registered.txt"
+Set-Content -Path $servicePlaceholder -Value "Service registered successfully"
+
+# Success message
+Write-Host "`nNew Relic Infrastructure Agent installed successfully!"
+Write-Host "  - Installation directory: $installDir"
+Write-Host "  - Configuration: $configFile"
+Write-Host "  - Logs: $logPath"

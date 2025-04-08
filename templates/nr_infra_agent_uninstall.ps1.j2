@@ -1,0 +1,72 @@
+# New Relic Infrastructure Agent Uninstallation Script
+# Generated on {{ timestamp }}
+# Based on New Relic documentation
+
+# Set error handling
+$ErrorActionPreference = "Stop"
+trap { Write-Error $_; exit 1 }
+
+Write-Host "Starting uninstallation of {{ target_name }} ({{ integration_type }})"
+
+# Display parameters
+Write-Host "Parameters:"
+{% for key, value in parameters.items() %}
+Write-Host "  - {{ key }}: {{ value }}"
+{% endfor %}
+
+# Define required directories and files
+$installDir = "{{ parameters.install_dir }}"
+$configPath = "{{ parameters.config_path }}"
+$logPath = "{{ parameters.log_path }}"
+
+Write-Host "`nStopping New Relic Infrastructure Agent service..."
+# Simulate stopping the service
+# In a real script, this would stop the service
+# For simulation purposes, we'll just remove the service file
+$serviceFile = Join-Path $installDir "service_registered.txt"
+if (Test-Path $serviceFile) {
+    Remove-Item -Path $serviceFile -Force
+    Write-Host "Service stopped successfully"
+} else {
+    Write-Host "Service was not running"
+}
+
+Write-Host "`nRemoving installation files..."
+# Remove agent executable
+$agentExe = Join-Path $installDir "infra_agent.exe"
+if (Test-Path $agentExe) {
+    Remove-Item -Path $agentExe -Force
+    Write-Host "Agent executable removed"
+}
+
+# Remove configuration files
+Write-Host "`nRemoving configuration files..."
+$configFile = Join-Path $configPath "config.json"
+if (Test-Path $configFile) {
+    Remove-Item -Path $configFile -Force
+    Write-Host "Configuration file removed: $configFile"
+}
+
+# Optionally remove directories
+Write-Host "`nWould you like to remove the installation directories? (Y/N)"
+Write-Host "Proceeding with directory removal..."
+
+# Remove configuration directory
+if (Test-Path $configPath) {
+    Remove-Item -Path $configPath -Force -Recurse
+    Write-Host "Configuration directory removed: $configPath"
+}
+
+# Remove log directory
+if (Test-Path $logPath) {
+    Remove-Item -Path $logPath -Force -Recurse
+    Write-Host "Log directory removed: $logPath"
+}
+
+# Remove installation directory
+if (Test-Path $installDir) {
+    Remove-Item -Path $installDir -Force -Recurse
+    Write-Host "Installation directory removed: $installDir"
+}
+
+Write-Host "`n✅ New Relic Infrastructure Agent uninstalled successfully!" -ForegroundColor Green

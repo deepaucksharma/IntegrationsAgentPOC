@@ -1,0 +1,110 @@
+# New Relic Infrastructure Agent Verification Script
+# Generated on {{ timestamp }}
+# Based on New Relic documentation
+
+# Set error handling
+$ErrorActionPreference = "Stop"
+trap { Write-Error $_; exit 1 }
+
+Write-Host "Starting verification of {{ target_name }} ({{ integration_type }})"
+
+# Display parameters
+Write-Host "Parameters:"
+{% for key, value in parameters.items() %}
+Write-Host "  - {{ key }}: {{ value }}"
+{% endfor %}
+
+# Define required directories and files
+$installDir = "{{ parameters.install_dir }}"
+$configPath = "{{ parameters.config_path }}"
+$logPath = "{{ parameters.log_path }}"
+$configFile = Join-Path $configPath "config.json"
+$agentExe = Join-Path $installDir "infra_agent.exe"
+$serviceFile = Join-Path $installDir "service_registered.txt"
+
+Write-Host "`nVerifying installation directories..."
+$directoriesOk = $true
+
+# Check installation directory
+if (-not (Test-Path $installDir)) {
+    Write-Host "❌ Installation directory does not exist: $installDir" -ForegroundColor Red
+    $directoriesOk = $false
+} else {
+    Write-Host "✅ Installation directory exists: $installDir" -ForegroundColor Green
+}
+
+# Check configuration directory
+if (-not (Test-Path $configPath)) {
+    Write-Host "❌ Configuration directory does not exist: $configPath" -ForegroundColor Red
+    $directoriesOk = $false
+} else {
+    Write-Host "✅ Configuration directory exists: $configPath" -ForegroundColor Green
+}
+
+# Check log directory
+if (-not (Test-Path $logPath)) {
+    Write-Host "❌ Log directory does not exist: $logPath" -ForegroundColor Red
+    $directoriesOk = $false
+} else {
+    Write-Host "✅ Log directory exists: $logPath" -ForegroundColor Green
+}
+
+Write-Host "`nVerifying files..."
+$filesOk = $true
+
+# Check config file
+if (-not (Test-Path $configFile)) {
+    Write-Host "❌ Configuration file does not exist: $configFile" -ForegroundColor Red
+    $filesOk = $false
+} else {
+    Write-Host "✅ Configuration file exists: $configFile" -ForegroundColor Green
+    
+    # Check config file contents
+    try {
+        $config = Get-Content -Path $configFile | ConvertFrom-Json
+        if ($config.license_key -eq "{{ parameters.license_key }}") {
+            Write-Host "✅ License key is correctly configured" -ForegroundColor Green
+        } else {
+            Write-Host "❌ License key is incorrectly configured" -ForegroundColor Red
+            $filesOk = $false
+        }
+    } catch {
+        Write-Host "❌ Error reading configuration file: $_" -ForegroundColor Red
+        $filesOk = $false
+    }
+}
+
+# Check agent executable
+if (-not (Test-Path $agentExe)) {
+    Write-Host "❌ Agent executable does not exist: $agentExe" -ForegroundColor Red
+    $filesOk = $false
+} else {
+    Write-Host "✅ Agent executable exists: $agentExe" -ForegroundColor Green
+}
+
+# Check service registration
+if (-not (Test-Path $serviceFile)) {
+    Write-Host "❌ Service registration file does not exist: $serviceFile" -ForegroundColor Red
+    $filesOk = $false
+} else {
+    Write-Host "✅ Service registration file exists: $serviceFile" -ForegroundColor Green
+}
+
+# Check service status (simulated)
+Write-Host "`nChecking service status..."
+if ((Test-Path $serviceFile) -and (Test-Path $agentExe)) {
+    Write-Host "✅ Service is running" -ForegroundColor Green
+    $serviceOk = $true
+} else {
+    Write-Host "❌ Service is not running" -ForegroundColor Red
+    $serviceOk = $false
+}
+
+# Overall verification result
+if ($directoriesOk -and $filesOk -and $serviceOk) {
+    Write-Host "`n✅ Verification successful! New Relic Infrastructure Agent is properly installed." -ForegroundColor Green
+    exit 0
+} else {
+    Write-Host "`n❌ Verification failed! Some components of New Relic Infrastructure Agent are missing or misconfigured." -ForegroundColor Red
+    exit 1
+}

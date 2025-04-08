@@ -3,6 +3,7 @@ Template management for script generation with consistent search and loading.
 """
 import logging
 import os
+import platform
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Union, Tuple
 import json
@@ -243,31 +244,60 @@ echo "Verifying {{ target_name }}"
         if template_key in self.templates_cache:
             logger.debug(f"Found exact template match for: {template_key}")
             return self.templates_cache[template_key]
+            
+        # Check if this template key already has an extension
+        base_template_key = template_key
+        template_ext = None
         
-        # Step 2: Try with different extensions
-        for ext in [".sh", ".ps1", ".py"]:
-            if template_key + ext in self.templates_cache:
-                template_with_ext = template_key + ext
-                logger.debug(f"Found template with extension: {template_with_ext}")
-                return self.templates_cache[template_with_ext]
+        for ext in [".ps1", ".sh", ".py", ".j2"]:
+            if template_key.endswith(ext):
+                base_template_key = template_key[:-len(ext)]
+                template_ext = ext
+                break
         
-        # Step 3: Try to find a default template for this action
+        # Step 2: Try with different extensions if no extension is present
+        if template_ext is None:
+            for ext in [".ps1", ".sh", ".py"]:
+                if template_key + ext in self.templates_cache:
+                    template_with_ext = template_key + ext
+                    logger.debug(f"Found template with extension: {template_with_ext}")
+                    return self.templates_cache[template_with_ext]
+                
+        # Step 3: Try with .j2 extension
+        if template_ext:
+            # Try with .j2 extension
+            if base_template_key + template_ext + ".j2" in self.templates_cache:
+                logger.debug(f"Found template with .j2 extension: {base_template_key + template_ext + '.j2'}")
+                return self.templates_cache[base_template_key + template_ext + ".j2"]
+            
+        # Step 4: Try to find a default template for this action
         if "/" in template_key:
-            # Extract action and integration from template key
+            # Extract action from template key
             parts = template_key.split("/")
             action = parts[0]
             
-            # Try action/default.sh
+            # Try with PowerShell first on Windows
+            if "win" in platform.system().lower():
+                default_ps_key = f"{action}/default.ps1"
+                if default_ps_key in self.templates_cache:
+                    logger.info(f"Using default template for {template_key}: {default_ps_key}")
+                    return self.templates_cache[default_ps_key]
+                    
+                # Try with .j2 extension
+                if default_ps_key + ".j2" in self.templates_cache:
+                    logger.info(f"Using default template for {template_key}: {default_ps_key}.j2")
+                    return self.templates_cache[default_ps_key + ".j2"]
+            
+            # Try Bash script
             default_key = f"{action}/default.sh"
             if default_key in self.templates_cache:
                 logger.info(f"Using default template for {template_key}: {default_key}")
                 return self.templates_cache[default_key]
-            
-            # Try action/default.ps1 for Windows
-            default_ps_key = f"{action}/default.ps1"
-            if default_ps_key in self.templates_cache:
-                logger.info(f"Using default PowerShell template for {template_key}: {default_ps_key}")
-                return self.templates_cache[default_ps_key]
+                
+            # Try with .j2 extension
+            if default_key + ".j2" in self.templates_cache:
+                logger.info(f"Using default template for {template_key}: {default_key}.j2")
+                return self.templates_cache[default_key + ".j2"]
         
         # Log clear message about template resolution failure
         logger.warning(f"Template not found: {template_key} (tried extensions and defaults)")

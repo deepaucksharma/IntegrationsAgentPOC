@@ -501,3 +501,28 @@ def sanitize_command(command: str) -> str:
     sanitized = re.sub(r'\s+-[rf]+\s+/', ' ', sanitized)
     
     return sanitized.strip()
+
+def merge_configs(base_config: Dict[str, Any], override_config: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Merge two configuration dictionaries with deep merge capability.
+    Override configuration takes precedence over base configuration.
+    
+    Args:
+        base_config: Base configuration dictionary
+        override_config: Override configuration dictionary
+        
+    Returns:
+        Merged configuration dictionary
+    """
+    result = base_config.copy()
+    
+    # Iterate through override config
+    for key, value in override_config.items():
+        # If both are dictionaries, merge recursively
+        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+            result[key] = merge_configs(result[key], value)
+        else:
+            # Otherwise override the value
+            result[key] = value
+            
+    return result

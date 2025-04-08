@@ -7,7 +7,7 @@ import sys
 import platform
 import re
 import shutil
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, Optional, Tuple, List
 
 logger = logging.getLogger(__name__)
 

@@ -99,3 +99,7 @@ class VerificationError(WorkflowError):
 class LLMError(WorkflowError):
     """Error in LLM interaction."""
     pass
+
+class ScriptError(WorkflowError):
+    """Error in script generation or validation."""
+    pass

@@ -1,35 +1,69 @@
-# PowerShell script for {{ target_name }}
-# Generated on {{ timestamp }}
+# Infrastructure Agent Installation Template
+# This is the default PowerShell template for installations
 
+# Error handling
 $ErrorActionPreference = "Stop"
 trap { Write-Error $_; exit 1 }
 
-Write-Host "Starting {{ action }} of {{ target_name }} ({{ integration_type }})"
+# Output information
+Write-Host "Installing {{ target_name }}"
+Write-Host "Integration type: {{ integration_type }}"
+Write-Host "License Key: {{ license_key }}"
+Write-Host "Host: {{ host }}"
 
-# Display parameters
-Write-Host "Parameters:"
-{% for key, value in parameters.items() %}
-Write-Host "  - {{ key }}: {{ value }}"
-{% endfor %}
+# Set default values for parameters
+$InstallDir = "{{ parameters.install_dir | default('C:/Users/hi/AppData/Local/InfraAgent') }}"
+$ConfigPath = "{{ parameters.config_path | default('C:/Users/hi/AppData/Local/InfraAgent/config') }}"
+$LogPath = "{{ parameters.log_path | default('C:/Users/hi/AppData/Local/InfraAgent/logs') }}"
+$Port = "{{ parameters.port | default('8765') }}"
 
-# Installation steps
-Write-Host "Installing {{ target_name }}..."
-{% if parameters.install_dir %}
-if (-not (Test-Path "{{ parameters.install_dir }}")) {
-    New-Item -ItemType Directory -Path "{{ parameters.install_dir }}" -Force | Out-Null
-    Write-Host "Created installation directory: {{ parameters.install_dir }}"
-} else {
-    Write-Host "Installation directory already exists: {{ parameters.install_dir }}"
+# Create directories
+New-Item -ItemType Directory -Force -Path "$InstallDir" | Out-Null
+New-Item -ItemType Directory -Force -Path "$ConfigPath" | Out-Null
+New-Item -ItemType Directory -Force -Path "$LogPath" | Out-Null
+
+# Write configuration
+$config = @{
+    "license_key" = "{{ license_key }}"
+    "host" = "{{ host }}"
+    "port" = "$Port"
+    "log_level" = "INFO"
 }
-{% endif %}
 
-{% if parameters.license_key %}
-Write-Host "Configuring license key..."
-# (This is just a placeholder - would configure license in a real script)
-{% endif %}
+$configJson = $config | ConvertTo-Json
+Set-Content -Path "$ConfigPath\config.json" -Value $configJson
 
-# Verification
-Write-Host "Verifying installation..."
-Write-Host "{{ target_name }} has been installed successfully"
+# Simulate downloading and installing the agent
+Write-Host "Downloading Infrastructure Agent package..."
+Start-Sleep -Seconds 1
+Write-Host "Downloaded Infrastructure Agent package"
 
+Write-Host "Installing Infrastructure Agent..."
+Start-Sleep -Seconds 1
+Write-Host "Infrastructure Agent installed successfully"
+
+# Report changes for tracking
+Write-Host "CHANGE_JSON_BEGIN"
+Write-Host @"
+{
+  "type": "file_create",
+  "target": "$ConfigPath\\config.json",
+  "revertible": true,
+  "backup_file": null
+}
+"@
+Write-Host "CHANGE_JSON_END"
+
+Write-Host "CHANGE_JSON_BEGIN"
+Write-Host @"
+{
+  "type": "directory_create",
+  "target": "$InstallDir",
+  "revertible": true,
+  "backup_file": null
+}
+"@
+Write-Host "CHANGE_JSON_END"
+
+Write-Host "Installation completed successfully"
 exit 0

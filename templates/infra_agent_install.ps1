@@ -4,15 +4,15 @@
 $ErrorActionPreference = "Stop"
 
 # Output information
-Write-Host "Installing {{ target_name }}"
-Write-Host "Integration type: {{ integration_type }}"
-Write-Host "License Key: {{ license_key }}"
-Write-Host "Host: {{ host }}"
+Write-Host "Installing infra_agent-integration"
+Write-Host "Integration type: infra_agent"
+Write-Host "License Key: test-key"
+Write-Host "Host: localhost"
 
-# Set default values for parameters with user-accessible paths
-$InstallDir = "$env:USERPROFILE\InfraAgent"
-$ConfigPath = "$env:USERPROFILE\InfraAgent\config" 
-$LogPath = "$env:USERPROFILE\InfraAgent\logs"
+# Set default values for parameters
+$InstallDir = "C:\Program Files\InfraAgent"
+$ConfigPath = "C:\ProgramData\InfraAgent\config" 
+$LogPath = "C:\ProgramData\InfraAgent\logs"
 $Port = "8765"
 
 # Create directories
@@ -22,8 +22,8 @@ New-Item -ItemType Directory -Force -Path "$LogPath" | Out-Null
 
 # Write configuration
 $config = @{
-    "license_key" = "{{ license_key }}"
-    "host" = "{{ host }}"
+    "license_key" = "test-key"
+    "host" = "localhost"
     "port" = "$Port"
     "log_level" = "INFO"
 }
@@ -69,5 +69,5 @@ Write-Host @"
 Write-Host "CHANGE_JSON_END"
 
 Write-Host "Infrastructure agent installed successfully"
-# Exit with success code
+# Exit success
 exit 0

@@ -92,7 +92,7 @@ class ScriptValidator:
                 errors.extend(shell_results["errors"])
             
             elif script_type == "powershell":
-                powershell_results = self._validate_powershell(script_content)
+                powershell_results = self._run_pscriptanalyzer(script_content)
                 warnings.extend(powershell_results["warnings"])
                 errors.extend(powershell_results["errors"])
             

@@ -2,34 +2,65 @@
 # Parameters:
 # - license_key: License key for the agent
 # - host: Target host
-# - port: Target port
-# - install_dir: Installation directory
-# - config_path: Configuration directory
-# - log_path: Log directory
+# - port (default: 8765): Target port
+# - install_dir (default: C:\Program Files\InfraAgent): Installation directory
+# - config_path (default: C:\ProgramData\InfraAgent\config): Configuration directory
+# - log_path (default: C:\ProgramData\InfraAgent\logs): Log directory
+
+# Set default values for optional parameters
+$InstallDir = "{{ install_dir | default('C:\\Program Files\\InfraAgent') }}"
+$ConfigPath = "{{ config_path | default('C:\\ProgramData\\InfraAgent\\config') }}"
+$LogPath = "{{ log_path | default('C:\\ProgramData\\InfraAgent\\logs') }}"
+$Port = "{{ port | default('8765') }}"
 
 # Create directories
-New-Item -ItemType Directory -Force -Path "{{ install_dir }}"
-New-Item -ItemType Directory -Force -Path "{{ config_path }}"
-New-Item -ItemType Directory -Force -Path "{{ log_path }}"
+New-Item -ItemType Directory -Force -Path "$InstallDir"
+New-Item -ItemType Directory -Force -Path "$ConfigPath"
+New-Item -ItemType Directory -Force -Path "$LogPath"
 
 # Write configuration
 $config = @{
     "license_key" = "{{ license_key }}"
     "host" = "{{ host }}"
-    "port" = "{{ port }}"
+    "port" = "$Port"
     "log_level" = "INFO"
 }
 
 $configJson = $config | ConvertTo-Json
-Set-Content -Path "{{ config_path }}\config.json" -Value $configJson
+Set-Content -Path "$ConfigPath\config.json" -Value $configJson
 
 # Install agent
 Write-Host "Installing infrastructure agent..."
-Write-Host "Installation directory: {{ install_dir }}"
-Write-Host "Configuration path: {{ config_path }}"
-Write-Host "Log path: {{ log_path }}"
+Write-Host "Installation directory: $InstallDir"
+Write-Host "Configuration path: $ConfigPath"
+Write-Host "Log path: $LogPath"
 
 # TODO: Add actual installation steps
 # For now, just simulate installation
 
-Write-Host "Infrastructure agent installed successfully" 
+Write-Host "Infrastructure agent installed successfully"
+
+# Report changes for tracking
+Write-Host "CHANGE_JSON_BEGIN"
+Write-Host @"
+{
+  "type": "file_create",
+  "target": "$ConfigPath\\config.json",
+  "revertible": true,
+  "backup_file": null
+}
+"@
+Write-Host "CHANGE_JSON_END"
+
+Write-Host "CHANGE_JSON_BEGIN"
+Write-Host @"
+{
+  "type": "directory_create",
+  "target": "$InstallDir",
+  "revertible": true,
+  "backup_file": null
+}
+"@
+Write-Host "CHANGE_JSON_END"
+
+exit 0
