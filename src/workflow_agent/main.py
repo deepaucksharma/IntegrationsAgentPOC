@@ -17,7 +17,7 @@ from typing_extensions import Annotated
 from pydantic import ValidationError
 
 from .core.state import WorkflowState, WorkflowStage, WorkflowStatus
-from .core.container import DependencyContainer
+from .core.service_container import ServiceContainer
 from .verification.dynamic import DynamicVerificationBuilder
 from .config.configuration import WorkflowConfiguration, ensure_workflow_config
 from .error.exceptions import (
@@ -29,7 +29,7 @@ from .error.exceptions import (
 )
 from .utils.system import get_system_context
 from .utils.logging import configure_logging, get_workflow_logger
-from .utils.error_handling import async_handle_errors
+from .error.handler import ErrorHandler, handle_safely_async
 from .utils.platform_utils import is_windows
 
 logger = logging.getLogger(__name__)
@@ -54,9 +54,13 @@ class WorkflowAgent:
             # Configure logging early for better debugging
             self._configure_logging()
             
-            # Create dependency container
-            self.container = DependencyContainer()
+            # Create service container
+            self.container = ServiceContainer()
             self.container.build_default_container(self.config)
+            
+            # Initialize services
+            loop = asyncio.get_event_loop()
+            loop.run_until_complete(self.container.initialize_services())
             
             logger.info("Workflow agent initialized successfully")
             
@@ -79,7 +83,7 @@ class WorkflowAgent:
         logger.info("Logging configured with level: %s", self.config.log_level)
         logger.debug("Full configuration: %s", self.config.model_dump())
 
-    @async_handle_errors("Workflow execution failed")
+    @handle_safely_async
     async def run_workflow(self, state: WorkflowState) -> WorkflowState:
         """
         Execute workflow with enhanced monitoring, checkpointing, and recovery.
@@ -102,8 +106,14 @@ class WorkflowAgent:
         try:
             workflow_logger.info("Starting workflow execution: %s for %s", state.action, state.target_name)
             
+            # Get state manager
+            state_manager = self.container.get("state_manager")
+            
             # Initialization Phase - checkpoint before starting
-            state = state.create_checkpoint(WorkflowStage.INITIALIZATION)
+            state = state_manager.apply_state_transition(
+                state, 
+                lambda s: s.create_checkpoint(WorkflowStage.INITIALIZATION)
+            )
             workflow_logger.info("Created initialization checkpoint")
             
             # Validate inputs first
@@ -443,10 +453,10 @@ class WorkflowAgent:
             logger.info(f"Max retry count reached ({state.retry_count}/{state.max_retries}), not retrying")
             return False
             
-        # Use the error_handling utility to determine if the error is retryable
-        from .utils.error_handling import is_retryable_error
+        # Use the ErrorHandler to determine if the error is retryable
+        from .error.handler import ErrorHandler
         
-        if error and is_retryable_error(error):
+        if error and ErrorHandler.is_retriable(error):
             logger.info(f"Error type {type(error).__name__} is retryable")
             return True
             
@@ -553,6 +563,129 @@ class WorkflowAgent:
                     logger.debug(f"Removed temporary file: {backup_file}")
             except Exception as e:
                 logger.warning(f"Failed to remove temporary file {backup_file}: {e}")
+                
+    async def install(self, integration_type: str, parameters: Dict[str, Any]) -> WorkflowState:
+        """
+        Convenience method to install an integration.
+        
+        Args:
+            integration_type: Type of integration to install
+            parameters: Installation parameters
+            
+        Returns:
+            Final workflow state
+        """
+        state_manager = self.container.get("state_manager")
+        
+        # Create initial state
+        state = state_manager.create_state(
+            action="install",
+            target_name=f"{integration_type}-integration",
+            integration_type=integration_type,
+            parameters=parameters,
+            system_context=get_system_context()
+        )
+        
+        # Run the workflow
+        return await self.run_workflow(state)
+        
+    async def verify(self, integration_type: str, parameters: Dict[str, Any]) -> WorkflowState:
+        """
+        Convenience method to verify an integration.
+        
+        Args:
+            integration_type: Type of integration to verify
+            parameters: Verification parameters
+            
+        Returns:
+            Final workflow state
+        """
+        state_manager = self.container.get("state_manager")
+        
+        # Create initial state
+        state = state_manager.create_state(
+            action="verify",
+            target_name=f"{integration_type}-integration",
+            integration_type=integration_type,
+            parameters=parameters,
+            system_context=get_system_context()
+        )
+        
+        # Run the workflow
+        return await self.run_workflow(state)
+        
+    async def uninstall(self, integration_type: str, parameters: Dict[str, Any]) -> WorkflowState:
+        """
+        Convenience method to uninstall an integration.
+        
+        Args:
+            integration_type: Type of integration to uninstall
+            parameters: Uninstallation parameters
+            
+        Returns:
+            Final workflow state
+        """
+        state_manager = self.container.get("state_manager")
+        
+        # Create initial state
+        state = state_manager.create_state(
+            action="uninstall",
+            target_name=f"{integration_type}-integration",
+            integration_type=integration_type,
+            parameters=parameters,
+            system_context=get_system_context()
+        )
+        
+        # Run the workflow
+        return await self.run_workflow(state)
+        
+    async def generate_script_with_agent(self, state: WorkflowState) -> WorkflowState:
+        """
+        Generate a script using the agent-based approach.
+        
+        Args:
+            state: Current workflow state
+            
+        Returns:
+            Updated workflow state with script
+        """
+        from .agent.base_agent import AgentContext
+        
+        # Get the script generation agent
+        script_agent = self.container.get("script_generation_agent")
+        
+        # Create agent context
+        context = AgentContext(workflow_state=state)
+        
+        # Execute agent
+        result = await script_agent.execute(context)
+        
+        # Return the updated state
+        return result.workflow_state
+        
+    async def verify_with_agent(self, state: WorkflowState) -> WorkflowState:
+        """
+        Verify an integration using the agent-based approach.
+        
+        Args:
+            state: Current workflow state
+            
+        Returns:
+            Updated workflow state with verification results
+        """
+        from .agent.base_agent import AgentContext
+        
+        # Get the verification agent
+        verification_agent = self.container.get("verification_agent")
+        
+        # Create agent context
+        context = AgentContext(workflow_state=state)
+        
+        # Execute agent with retry
+        result = await verification_agent.execute_with_retry(context)
+        
+        # Return the updated state
+        return result.workflow_state
 
 # Create CLI app
 app = typer.Typer()
@@ -570,22 +703,15 @@ def install(
 ):
     """Install an integration."""
     try:
-        # Create workflow state
-        state = WorkflowState(
-            action="install",
-            target_name=f"{integration}-integration",
-            integration_type=integration,
-            parameters={
-                "license_key": license_key,
-                "host": host,
-                "install_dir": install_dir,
-                "config_path": config_path,
-                "log_path": log_path,
-                "port": port
-            },
-            system_context=get_system_context(),
-            template_data={}
-        )
+        # Prepare parameters
+        parameters = {
+            "license_key": license_key,
+            "host": host,
+            "install_dir": install_dir,
+            "config_path": config_path,
+            "log_path": log_path,
+            "port": port
+        }
         
         async def run():
             # Initialize with configuration file if provided
@@ -594,10 +720,18 @@ def install(
                 from .config.configuration import load_configuration_from_file
                 config = load_configuration_from_file(config_file)
                 
-            # Initialize and run workflow
+            # Initialize agent and run installation
             agent = WorkflowAgent(config)
-            return await agent.run_workflow(state)
-                
+            return await agent.install(integration, parameters)
+        
+        # Initialize with configuration file if provided
+        config = None
+        if config_file:
+            from .config.configuration import load_configuration_from_file
+            config = load_configuration_from_file(config_file)
+            
+        # Initialize the agent and run the workflow
+        agent = WorkflowAgent(config)
         result = asyncio.run(run())
         if result.has_error:
             logger.error(f"Installation failed: {result.error}")
@@ -621,21 +755,25 @@ def verify(
 ):
     """Verify an integration installation."""
     try:
-        # Create workflow state
-        state = WorkflowState(
-            action="verify",
-            target_name=f"{integration}-integration",
-            integration_type=integration,
-            parameters={
-                "host": host,
-                "install_dir": install_dir,
-                "config_path": config_path,
-                "log_path": log_path,
-                "port": port
-            },
-            system_context=get_system_context(),
-            template_data={}
-        )
+        # Prepare parameters
+        parameters = {
+            "host": host,
+            "install_dir": install_dir,
+            "config_path": config_path,
+            "log_path": log_path,
+            "port": port
+        }
+        
+        async def run():
+            # Initialize with configuration file if provided
+            config = None
+            if config_file:
+                from .config.configuration import load_configuration_from_file
+                config = load_configuration_from_file(config_file)
+                
+            # Initialize agent and run verification
+            agent = WorkflowAgent(config)
+            return await agent.verify(integration, parameters)
         
         async def run():
             # Initialize with configuration file if provided
@@ -671,21 +809,25 @@ def remove(
 ):
     """Remove an integration."""
     try:
-        # Create workflow state
-        state = WorkflowState(
-            action="uninstall",
-            target_name=f"{integration}-integration",
-            integration_type=integration,
-            parameters={
-                "host": host,
-                "install_dir": install_dir,
-                "config_path": config_path,
-                "log_path": log_path,
-                "port": port
-            },
-            system_context=get_system_context(),
-            template_data={}
-        )
+        # Prepare parameters
+        parameters = {
+            "host": host,
+            "install_dir": install_dir,
+            "config_path": config_path,
+            "log_path": log_path,
+            "port": port
+        }
+        
+        async def run():
+            # Initialize with configuration file if provided
+            config = None
+            if config_file:
+                from .config.configuration import load_configuration_from_file
+                config = load_configuration_from_file(config_file)
+                
+            # Initialize agent and run uninstallation
+            agent = WorkflowAgent(config)
+            return await agent.uninstall(integration, parameters)
         
         async def run():
             # Initialize with configuration file if provided

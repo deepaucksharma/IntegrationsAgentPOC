@@ -13,7 +13,7 @@ from jinja2 import Environment, FileSystemLoader, Template, select_autoescape
 
 from ..config.configuration import WorkflowConfiguration
 from ..error.exceptions import TemplateError
-from ..utils.error_handling import handle_errors
+from ..error.handler import ErrorHandler, handle_safely
 
 logger = logging.getLogger(__name__)
 
@@ -303,7 +303,7 @@ echo "Verifying {{ target_name }}"
         logger.warning(f"Template not found: {template_key} (tried extensions and defaults)")
         return None
 
-    @handle_errors("Template rendering failed")
+    @handle_safely
     def render_template(
         self, 
         template_key: str, 
@@ -344,7 +344,7 @@ echo "Verifying {{ target_name }}"
             logger.error(error_msg)
             raise TemplateError(error_msg) from e
 
-    @handle_errors("Template string rendering failed")
+    @handle_safely
     def render_string_template(
         self, 
         template_content: str, 

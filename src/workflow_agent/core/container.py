@@ -266,25 +266,52 @@ class DependencyContainer:
         from ..scripting.generator import ScriptGenerator
         from ..scripting.validator import ScriptValidator
         from ..scripting.dynamic_generator import DynamicScriptGenerator
-        from ..templates.manager import TemplateManager
+        from ..templates import TemplateManager
+        from ..templates.registry.template_registry import TemplateRegistry
+        from ..templates.pipeline import create_default_pipeline
+        from ..agent.script_agent import ScriptGenerationAgent
         
+        # Set up template components
         template_manager = TemplateManager(config)
         self.register_instance("template_manager", template_manager)
         
+        # Register template registry and pipeline 
+        registry = TemplateRegistry(search_paths=[
+            str(path) for path in template_manager.template_dirs.values() if path.exists()
+        ])
+        registry.scan_templates()  
+        self.register_instance("template_registry", registry)
+        
+        # Create and register template pipeline
+        pipeline = create_default_pipeline(
+            search_paths=[str(path) for path in template_manager.template_dirs.values() if path.exists()],
+            registry=registry
+        )
+        self.register_instance("template_pipeline", pipeline)
+        
+        # Register traditional script components
         self.register_singleton("script_generator", ScriptGenerator, config, template_manager)
         self.register_singleton("script_validator", ScriptValidator, config)
         self.register_singleton("dynamic_script_generator", DynamicScriptGenerator, config)
+        
+        # Register agent-based components
+        self.register_singleton("script_generation_agent", ScriptGenerationAgent, template_manager)
         
     def _load_verification_components(self, config) -> None:
         """Load verification-related components."""
         from ..verification.dynamic import DynamicVerificationBuilder
         from ..verification.manager import VerificationManager
+        from ..agent.verification_agent import VerificationAgent
         
         # Need template manager for VerificationManager
         template_manager = self.get("template_manager")
         
+        # Register traditional verification components
         self.register_singleton("verification_manager", VerificationManager, config, template_manager)
         self.register_singleton("dynamic_verification_builder", DynamicVerificationBuilder, config)
+        
+        # Register agent-based components
+        self.register_singleton("verification_agent", VerificationAgent)
         
     def _load_knowledge_components(self, config) -> None:
         """Load knowledge-related components."""
@@ -307,7 +334,13 @@ class DependencyContainer:
     def _load_storage_components(self, config) -> None:
         """Load storage-related components."""
         from ..storage.history import ExecutionHistoryManager
+        from .state_manager import StateManager
         
+        # Register state manager with config-specified storage path
+        storage_path = getattr(config, "state_storage_path", "workflow_states.db")
+        self.register_singleton("state_manager", StateManager, storage_path)
+        
+        # Register execution history manager
         self.register_singleton("execution_history_manager", ExecutionHistoryManager, config)
         
     def _load_integration_components(self, config) -> None:

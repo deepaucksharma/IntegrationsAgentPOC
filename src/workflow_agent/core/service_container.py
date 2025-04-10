@@ -627,6 +627,14 @@ class ServiceContainer:
                     lifecycle=ServiceLifecycle.UNINITIALIZED
                 )
                 
+                # Add appropriate tags based on service name
+                if name.endswith("_manager"):
+                    metadata.tags.append("manager")
+                if "template" in name:
+                    metadata.tags.append("template")
+                if name in ["template_registry", "template_pipeline", "template_manager"]:
+                    metadata.tags.append("template_system")
+                
                 # Wrap provider
                 self.container.providers[name] = TrackedProvider(provider, metadata)
                 

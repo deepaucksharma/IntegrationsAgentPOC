@@ -18,7 +18,7 @@ from ..error.exceptions import ExecutionError, SecurityError
 from ..core.state import WorkflowState, Change, OutputData, WorkflowStatus
 from ..config.configuration import WorkflowConfiguration, validate_script_security
 from ..utils.subprocess_utils import async_secure_shell_execute
-from ..utils.error_handling import async_handle_errors
+from ..error.handler import ErrorHandler, handle_safely_async
 from .isolation import IsolationFactory, IsolationStrategy
 
 logger = logging.getLogger(__name__)
@@ -36,7 +36,7 @@ class ScriptExecutor:
         self.config = config
         self._context = {}  # Execution context for integration execution
         
-    @async_handle_errors("Script execution failed")
+    @handle_safely_async
     async def execute(self, state: WorkflowState) -> WorkflowState:
         """
         Execute a script contained in the workflow state.

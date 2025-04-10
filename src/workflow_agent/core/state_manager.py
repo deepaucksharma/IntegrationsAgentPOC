@@ -1,546 +1,554 @@
 """
-State management system with event-based observer pattern.
+Centralized state management with persistence, history tracking, and state transitions.
 """
 import logging
+import json
+import time
 import asyncio
-from typing import Dict, Any, Optional, List, Set, Protocol, runtime_checkable, Callable
-from uuid import UUID, uuid4
+from typing import Dict, Any, Optional, List, Union, Callable, Awaitable
 from datetime import datetime
-from enum import Enum
-from abc import ABC, abstractmethod
-from pydantic import BaseModel
+from pathlib import Path
+import uuid
+import sqlite3
+from contextlib import contextmanager
 
-from .state import WorkflowState, WorkflowStatus, WorkflowStage
+from .state import WorkflowState, WorkflowStage, WorkflowStatus, Change
+from ..error.handler import ErrorHandler, handle_safely
 from ..error.exceptions import StateError
-from ..error.handler import ErrorHandler, handle_safely_async, retry
 
 logger = logging.getLogger(__name__)
 
-class StateEvent(BaseModel):
-    """Base event for state changes with metadata."""
-    event_type: str
-    workflow_id: str
-    timestamp: datetime = datetime.now()
-    event_id: UUID = uuid4()
-    
-    class Config:
-        frozen = True
-
-class StateCreatedEvent(StateEvent):
-    """Event fired when a new workflow state is created."""
-    event_type: str = "state_created"
-    state: Dict[str, Any]  # Serialized state
-
-class StateTransitionEvent(StateEvent):
-    """Event fired when a workflow transitions between states."""
-    event_type: str = "state_transition"
-    from_status: Optional[WorkflowStatus] = None
-    to_status: WorkflowStatus
-    from_stage: Optional[WorkflowStage] = None
-    to_stage: Optional[WorkflowStage] = None
-
-class ErrorEvent(StateEvent):
-    """Event fired when an error occurs in the workflow."""
-    event_type: str = "error"
-    error_message: str
-    error_type: str
-    error_context: Dict[str, Any] = {}
-
-class CompletionEvent(StateEvent):
-    """Event fired when a workflow completes."""
-    event_type: str = "completion"
-    success: bool
-    duration: float  # in seconds
-    summary: Dict[str, Any] = {}
-
-@runtime_checkable
-class StateObserver(Protocol):
-    """Protocol for state observers that can react to state events."""
-    
-    async def on_event(self, event: StateEvent) -> None:
-        """
-        Called when a state event occurs.
-        
-        Args:
-            event: The state event
-        """
-        ...
-
-class StateStorage(ABC):
-    """Abstract interface for state storage."""
-    
-    @abstractmethod
-    async def save_state(self, state: WorkflowState) -> bool:
-        """
-        Save a workflow state.
-        
-        Args:
-            state: The state to save
-            
-        Returns:
-            True if saved successfully
-        """
-        pass
-    
-    @abstractmethod
-    async def load_state(self, workflow_id: str) -> Optional[WorkflowState]:
-        """
-        Load a workflow state.
-        
-        Args:
-            workflow_id: The workflow ID
-            
-        Returns:
-            The workflow state, or None if not found
-        """
-        pass
-    
-    @abstractmethod
-    async def list_workflows(self, status: Optional[WorkflowStatus] = None) -> List[str]:
-        """
-        List workflow IDs.
-        
-        Args:
-            status: Optional status filter
-            
-        Returns:
-            List of workflow IDs
-        """
-        pass
-    
-    @abstractmethod
-    async def save_event(self, event: StateEvent) -> bool:
-        """
-        Save a state event.
-        
-        Args:
-            event: The event to save
-            
-        Returns:
-            True if saved successfully
-        """
-        pass
-    
-    @abstractmethod
-    async def get_events(self, workflow_id: str) -> List[StateEvent]:
-        """
-        Get all events for a workflow.
-        
-        Args:
-            workflow_id: The workflow ID
-            
-        Returns:
-            List of events
-        """
-        pass
-
-class InMemoryStateStorage(StateStorage):
-    """In-memory implementation of state storage."""
-    
-    def __init__(self):
-        """Initialize the storage."""
-        self.states: Dict[str, WorkflowState] = {}
-        self.events: Dict[str, List[StateEvent]] = {}
-    
-    async def save_state(self, state: WorkflowState) -> bool:
-        """Save a workflow state."""
-        if not state.transaction_id:
-            logger.error("Cannot save state without transaction_id")
-            return False
-            
-        self.states[state.transaction_id] = state
-        return True
-    
-    async def load_state(self, workflow_id: str) -> Optional[WorkflowState]:
-        """Load a workflow state."""
-        return self.states.get(workflow_id)
-    
-    async def list_workflows(self, status: Optional[WorkflowStatus] = None) -> List[str]:
-        """List workflow IDs."""
-        if status:
-            return [wf_id for wf_id, state in self.states.items() if state.status == status]
-        return list(self.states.keys())
-    
-    async def save_event(self, event: StateEvent) -> bool:
-        """Save a state event."""
-        if event.workflow_id not in self.events:
-            self.events[event.workflow_id] = []
-            
-        self.events[event.workflow_id].append(event)
-        return True
-    
-    async def get_events(self, workflow_id: str) -> List[StateEvent]:
-        """Get all events for a workflow."""
-        return self.events.get(workflow_id, [])
-
 class StateManager:
     """
-    Manages workflow state with immutability, event sourcing, and observer pattern.
-    Handles state transitions, notifications, and persistence.
+    Centralized manager for workflow state with persistence and tracking capabilities.
+    Provides methods for creating, updating, loading, and persisting workflow states.
     """
     
-    def __init__(self, storage: Optional[StateStorage] = None):
+    def __init__(self, storage_path: Optional[str] = None, max_history: int = 100):
         """
         Initialize the state manager.
         
         Args:
-            storage: Optional storage implementation
+            storage_path: Path to store state data (None for in-memory only)
+            max_history: Maximum number of historical states to keep
         """
-        self.storage = storage or InMemoryStateStorage()
-        self.observers: Dict[str, Set[StateObserver]] = {
-            "state_created": set(),
-            "state_transition": set(),
-            "error": set(),
-            "completion": set(),
-            "all": set()  # Observers that receive all events
-        }
-        self.active_states: Dict[str, WorkflowState] = {}
-        self._lock = asyncio.Lock()
-    
-    def register_observer(self, observer: StateObserver, event_types: Optional[List[str]] = None) -> None:
-        """
-        Register an observer for specific event types.
+        self.storage_path = Path(storage_path) if storage_path else None
+        self.max_history = max_history
+        self._in_memory_states: Dict[str, List[WorkflowState]] = {}
+        self._active_states: Dict[str, WorkflowState] = {}
         
-        Args:
-            observer: The observer to register
-            event_types: Optional list of event types to observe
-                         If None, observes all events
-        """
-        if event_types is None:
-            self.observers["all"].add(observer)
-            logger.debug(f"Registered observer {observer.__class__.__name__} for all events")
-        else:
-            for event_type in event_types:
-                if event_type not in self.observers:
-                    self.observers[event_type] = set()
-                self.observers[event_type].add(observer)
-                logger.debug(f"Registered observer {observer.__class__.__name__} for {event_type} events")
-    
-    def unregister_observer(self, observer: StateObserver) -> None:
-        """
-        Unregister an observer from all event types.
-        
-        Args:
-            observer: The observer to unregister
-        """
-        for observers in self.observers.values():
-            if observer in observers:
-                observers.remove(observer)
-                
-        logger.debug(f"Unregistered observer {observer.__class__.__name__}")
-    
-    @handle_safely_async
-    async def notify_observers(self, event: StateEvent) -> None:
-        """
-        Notify observers of an event.
-        
-        Args:
-            event: The event to notify about
-        """
-        observers_to_notify = set()
-        
-        # Add observers for this event type
-        if event.event_type in self.observers:
-            observers_to_notify.update(self.observers[event.event_type])
+        # Initialize storage if path provided
+        if self.storage_path:
+            self._initialize_storage()
             
-        # Add observers for all events
-        observers_to_notify.update(self.observers["all"])
-        
-        # Notify observers
-        notification_tasks = []
-        for observer in observers_to_notify:
-            notification_tasks.append(self._notify_observer(observer, event))
-            
-        if notification_tasks:
-            await asyncio.gather(*notification_tasks, return_exceptions=True)
-            
-        # Save event to storage
-        await self.storage.save_event(event)
+        logger.debug("StateManager initialized")
     
-    @handle_safely_async
-    async def _notify_observer(self, observer: StateObserver, event: StateEvent) -> None:
-        """Notify a single observer of an event."""
+    def _initialize_storage(self) -> None:
+        """Initialize the storage database."""
+        self.storage_path.parent.mkdir(parents=True, exist_ok=True)
+        
         try:
-            await observer.on_event(event)
+            with self._get_db_connection() as conn:
+                cursor = conn.cursor()
+                # Create states table
+                cursor.execute("""
+                CREATE TABLE IF NOT EXISTS workflow_states (
+                    state_id TEXT PRIMARY KEY,
+                    transaction_id TEXT NOT NULL,
+                    parent_state_id TEXT,
+                    action TEXT NOT NULL,
+                    target_name TEXT NOT NULL,
+                    integration_type TEXT NOT NULL,
+                    stage TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    created_at TIMESTAMP NOT NULL,
+                    state_data TEXT NOT NULL,
+                    is_active BOOLEAN DEFAULT 0
+                );
+                """)
+                
+                # Create index for transaction lookup
+                cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_transaction_id
+                ON workflow_states (transaction_id);
+                """)
+                
+                # Create index for active states
+                cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_is_active
+                ON workflow_states (is_active);
+                """)
+                
+                conn.commit()
+                logger.debug(f"State storage initialized at {self.storage_path}")
         except Exception as e:
-            logger.error(f"Error notifying observer {observer.__class__.__name__}: {e}")
+            logger.error(f"Failed to initialize state storage: {e}")
+            raise StateError(f"Failed to initialize state storage: {e}")
     
-    @retry(max_retries=3)
-    async def create_workflow(self, state: WorkflowState) -> str:
+    @contextmanager
+    def _get_db_connection(self):
+        """Get a database connection with context manager."""
+        if not self.storage_path:
+            raise StateError("No storage path configured")
+            
+        conn = None
+        try:
+            conn = sqlite3.connect(str(self.storage_path))
+            conn.row_factory = sqlite3.Row
+            yield conn
+        finally:
+            if conn:
+                conn.close()
+    
+    @handle_safely
+    def create_state(
+        self, 
+        action: str,
+        target_name: str,
+        integration_type: str,
+        parameters: Optional[Dict[str, Any]] = None,
+        template_data: Optional[Dict[str, Any]] = None,
+        system_context: Optional[Dict[str, Any]] = None,
+        transaction_id: Optional[str] = None
+    ) -> WorkflowState:
         """
         Create a new workflow state.
         
         Args:
-            state: Initial workflow state
+            action: Action to perform
+            target_name: Target name
+            integration_type: Integration type
+            parameters: Optional parameters
+            template_data: Optional template data
+            system_context: Optional system context
+            transaction_id: Optional transaction ID (generated if not provided)
             
         Returns:
-            Workflow ID
-            
-        Raises:
-            StateError: If state creation fails
+            New workflow state
         """
-        workflow_id = state.transaction_id
-        if not workflow_id:
-            raise StateError("Cannot create workflow without transaction_id")
-            
-        async with self._lock:
-            # Check if workflow already exists
-            if workflow_id in self.active_states:
-                raise StateError(f"Workflow {workflow_id} already exists")
-                
-            # Store state
-            self.active_states[workflow_id] = state
-            
-            # Save to storage
-            save_success = await self.storage.save_state(state)
-            
-            if not save_success:
-                raise StateError(f"Failed to save state for workflow {workflow_id}")
-                
-        # Create event
-        event = StateCreatedEvent(
-            workflow_id=workflow_id,
-            state=state.model_dump()
+        # Create the state
+        state = WorkflowState(
+            action=action,
+            target_name=target_name,
+            integration_type=integration_type,
+            parameters=parameters or {},
+            template_data=template_data or {},
+            system_context=system_context or {},
+            transaction_id=transaction_id
         )
         
-        # Notify observers
-        await self.notify_observers(event)
+        # Add to active states
+        self._active_states[str(state.transaction_id)] = state
         
-        logger.info(f"Created workflow {workflow_id}")
-        return workflow_id
+        # Add to history
+        if state.transaction_id not in self._in_memory_states:
+            self._in_memory_states[state.transaction_id] = []
+        self._in_memory_states[state.transaction_id].append(state)
+        
+        # Trim history if needed
+        if len(self._in_memory_states[state.transaction_id]) > self.max_history:
+            self._in_memory_states[state.transaction_id] = self._in_memory_states[state.transaction_id][-self.max_history:]
+        
+        # Persist state if storage configured
+        if self.storage_path:
+            self._persist_state(state, is_active=True)
+            
+        logger.debug(f"Created new state for transaction {state.transaction_id}")
+        return state
     
-    @retry(max_retries=3)
-    async def update_state(self, workflow_id: str, new_state: WorkflowState) -> WorkflowState:
+    @handle_safely
+    def update_state(self, state: WorkflowState) -> WorkflowState:
         """
-        Update a workflow state.
+        Update an existing state.
         
         Args:
-            workflow_id: Workflow ID
-            new_state: New workflow state
+            state: Updated workflow state
             
         Returns:
-            Updated workflow state
+            The updated state
             
         Raises:
-            StateError: If state update fails
+            StateError: If transaction not found
         """
-        if not workflow_id:
-            raise StateError("Cannot update workflow without ID")
-            
-        old_state = None
+        transaction_id = state.transaction_id
         
-        async with self._lock:
-            # Get current state
-            old_state = self.active_states.get(workflow_id)
+        if not transaction_id:
+            raise StateError("Cannot update state without transaction_id")
             
-            if not old_state:
-                # Try loading from storage
-                old_state = await self.storage.load_state(workflow_id)
-                
-                if not old_state:
-                    raise StateError(f"Workflow {workflow_id} not found")
-                    
-                # Cache in active states
-                self.active_states[workflow_id] = old_state
+        # Update active state
+        self._active_states[transaction_id] = state
+        
+        # Add to history
+        if transaction_id not in self._in_memory_states:
+            self._in_memory_states[transaction_id] = []
+        self._in_memory_states[transaction_id].append(state)
+        
+        # Trim history if needed
+        if len(self._in_memory_states[transaction_id]) > self.max_history:
+            self._in_memory_states[transaction_id] = self._in_memory_states[transaction_id][-self.max_history:]
+        
+        # Persist state if storage configured
+        if self.storage_path:
+            self._persist_state(state, is_active=True)
             
-            # Store new state
-            self.active_states[workflow_id] = new_state
-            
-            # Save to storage
-            save_success = await self.storage.save_state(new_state)
-            
-            if not save_success:
-                raise StateError(f"Failed to save state for workflow {workflow_id}")
-                
-        # Create transition event if status changed
-        if old_state.status != new_state.status or old_state.current_stage != new_state.current_stage:
-            event = StateTransitionEvent(
-                workflow_id=workflow_id,
-                from_status=old_state.status,
-                to_status=new_state.status,
-                from_stage=old_state.current_stage,
-                to_stage=new_state.current_stage
-            )
-            
-            # Notify observers
-            await self.notify_observers(event)
-            
-        # Create error event if error was added
-        if not old_state.error and new_state.error:
-            event = ErrorEvent(
-                workflow_id=workflow_id,
-                error_message=new_state.error,
-                error_type="workflow_error"
-            )
-            
-            # Notify observers
-            await self.notify_observers(event)
-            
-        # Create completion event if workflow completed or failed
-        if old_state.status not in [WorkflowStatus.COMPLETED, WorkflowStatus.FAILED] and \
-           new_state.status in [WorkflowStatus.COMPLETED, WorkflowStatus.FAILED]:
-            
-            # Calculate duration
-            start_time = new_state.metrics.start_time
-            end_time = new_state.metrics.end_time or datetime.now()
-            duration = (end_time - start_time).total_seconds()
-            
-            event = CompletionEvent(
-                workflow_id=workflow_id,
-                success=new_state.status == WorkflowStatus.COMPLETED,
-                duration=duration,
-                summary={
-                    "status": new_state.status,
-                    "changes": len(new_state.changes),
-                    "error": new_state.error
-                }
-            )
-            
-            # Notify observers
-            await self.notify_observers(event)
-            
-        logger.info(f"Updated workflow {workflow_id} state: {old_state.status} -> {new_state.status}")
-        return new_state
+        logger.debug(f"Updated state for transaction {transaction_id}")
+        return state
     
-    async def get_state(self, workflow_id: str) -> Optional[WorkflowState]:
+    @handle_safely
+    def get_active_state(self, transaction_id: str) -> Optional[WorkflowState]:
         """
-        Get current workflow state.
+        Get the active state for a transaction.
         
         Args:
-            workflow_id: Workflow ID
+            transaction_id: Transaction ID
             
         Returns:
-            Current workflow state or None if not found
+            Active workflow state or None if not found
         """
-        async with self._lock:
-            # Check in-memory cache first
-            if workflow_id in self.active_states:
-                return self.active_states[workflow_id]
-                
-            # Try loading from storage
-            state = await self.storage.load_state(workflow_id)
+        # Check in-memory first
+        if transaction_id in self._active_states:
+            return self._active_states[transaction_id]
             
-            if state:
-                # Cache for future use
-                self.active_states[workflow_id] = state
+        # Try to load from storage
+        if self.storage_path:
+            try:
+                with self._get_db_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("""
+                    SELECT state_data FROM workflow_states 
+                    WHERE transaction_id = ? AND is_active = 1
+                    """, (transaction_id,))
+                    
+                    row = cursor.fetchone()
+                    if row:
+                        state_data = json.loads(row['state_data'])
+                        state = WorkflowState.parse_obj(state_data)
+                        
+                        # Cache in memory
+                        self._active_states[transaction_id] = state
+                        return state
+            except Exception as e:
+                logger.error(f"Failed to load active state for transaction {transaction_id}: {e}")
                 
-            return state
+        return None
     
-    async def apply_change(
+    @handle_safely
+    def get_state_history(self, transaction_id: str) -> List[WorkflowState]:
+        """
+        Get the history of states for a transaction.
+        
+        Args:
+            transaction_id: Transaction ID
+            
+        Returns:
+            List of historical workflow states
+        """
+        # Check in-memory first
+        if transaction_id in self._in_memory_states:
+            return self._in_memory_states[transaction_id]
+            
+        # Try to load from storage
+        states = []
+        if self.storage_path:
+            try:
+                with self._get_db_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("""
+                    SELECT state_data FROM workflow_states 
+                    WHERE transaction_id = ?
+                    ORDER BY created_at
+                    """, (transaction_id,))
+                    
+                    for row in cursor.fetchall():
+                        state_data = json.loads(row['state_data'])
+                        state = WorkflowState.parse_obj(state_data)
+                        states.append(state)
+                        
+                # Cache in memory
+                self._in_memory_states[transaction_id] = states
+            except Exception as e:
+                logger.error(f"Failed to load state history for transaction {transaction_id}: {e}")
+                
+        return states
+    
+    @handle_safely
+    def complete_transaction(self, transaction_id: str, status: WorkflowStatus) -> Optional[WorkflowState]:
+        """
+        Mark a transaction as completed.
+        
+        Args:
+            transaction_id: Transaction ID
+            status: Final status
+            
+        Returns:
+            Final workflow state or None if not found
+        """
+        state = self.get_active_state(transaction_id)
+        if not state:
+            logger.warning(f"Cannot complete transaction {transaction_id}: no active state found")
+            return None
+            
+        # Update status
+        final_state = state.evolve(status=status)
+        
+        # Update state
+        self.update_state(final_state)
+        
+        # Mark as inactive in storage
+        if self.storage_path:
+            try:
+                with self._get_db_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("""
+                    UPDATE workflow_states 
+                    SET is_active = 0
+                    WHERE transaction_id = ?
+                    """, (transaction_id,))
+                    conn.commit()
+            except Exception as e:
+                logger.error(f"Failed to mark transaction {transaction_id} as inactive: {e}")
+                
+        # Remove from active states
+        if transaction_id in self._active_states:
+            del self._active_states[transaction_id]
+            
+        logger.debug(f"Completed transaction {transaction_id} with status {status}")
+        return final_state
+    
+    @handle_safely
+    def _persist_state(self, state: WorkflowState, is_active: bool = True) -> None:
+        """
+        Persist a state to storage.
+        
+        Args:
+            state: Workflow state to persist
+            is_active: Whether the state is active
+        """
+        if not self.storage_path:
+            return
+            
+        try:
+            # Convert state to JSON
+            state_data = state.model_dump()
+            
+            with self._get_db_connection() as conn:
+                cursor = conn.cursor()
+                
+                # First, check if state already exists
+                cursor.execute("""
+                SELECT state_id FROM workflow_states 
+                WHERE state_id = ?
+                """, (str(state.state_id),))
+                
+                if cursor.fetchone():
+                    # Update existing state
+                    cursor.execute("""
+                    UPDATE workflow_states 
+                    SET transaction_id = ?,
+                        parent_state_id = ?,
+                        action = ?,
+                        target_name = ?,
+                        integration_type = ?,
+                        stage = ?,
+                        status = ?,
+                        state_data = ?,
+                        is_active = ?
+                    WHERE state_id = ?
+                    """, (
+                        state.transaction_id,
+                        str(state.parent_state_id) if state.parent_state_id else None,
+                        state.action,
+                        state.target_name,
+                        state.integration_type,
+                        state.current_stage,
+                        state.status,
+                        json.dumps(state_data),
+                        1 if is_active else 0,
+                        str(state.state_id)
+                    ))
+                else:
+                    # Insert new state
+                    cursor.execute("""
+                    INSERT INTO workflow_states (
+                        state_id,
+                        transaction_id,
+                        parent_state_id,
+                        action,
+                        target_name,
+                        integration_type,
+                        stage,
+                        status,
+                        created_at,
+                        state_data,
+                        is_active
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        str(state.state_id),
+                        state.transaction_id,
+                        str(state.parent_state_id) if state.parent_state_id else None,
+                        state.action,
+                        state.target_name,
+                        state.integration_type,
+                        state.current_stage,
+                        state.status,
+                        state.created_at.isoformat(),
+                        json.dumps(state_data),
+                        1 if is_active else 0
+                    ))
+                    
+                conn.commit()
+        except Exception as e:
+            logger.error(f"Failed to persist state {state.state_id}: {e}")
+    
+    @handle_safely
+    def get_active_transactions(self) -> List[str]:
+        """
+        Get a list of active transaction IDs.
+        
+        Returns:
+            List of active transaction IDs
+        """
+        # Start with in-memory active states
+        transaction_ids = list(self._active_states.keys())
+        
+        # Add from storage if configured
+        if self.storage_path:
+            try:
+                with self._get_db_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("""
+                    SELECT DISTINCT transaction_id FROM workflow_states 
+                    WHERE is_active = 1
+                    """)
+                    
+                    for row in cursor.fetchall():
+                        transaction_id = row['transaction_id']
+                        if transaction_id not in transaction_ids:
+                            transaction_ids.append(transaction_id)
+            except Exception as e:
+                logger.error(f"Failed to get active transactions: {e}")
+                
+        return transaction_ids
+    
+    @handle_safely
+    def cleanup_old_transactions(self, days_to_keep: int = 30) -> int:
+        """
+        Clean up old transactions from storage.
+        
+        Args:
+            days_to_keep: Number of days to keep transactions
+            
+        Returns:
+            Number of transactions cleaned up
+        """
+        if not self.storage_path:
+            return 0
+            
+        try:
+            cutoff_date = datetime.now() - datetime.timedelta(days=days_to_keep)
+            cutoff_str = cutoff_date.isoformat()
+            
+            with self._get_db_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Get transaction IDs to clean up
+                cursor.execute("""
+                SELECT DISTINCT transaction_id FROM workflow_states 
+                WHERE created_at < ? AND is_active = 0
+                """, (cutoff_str,))
+                
+                transaction_ids = [row['transaction_id'] for row in cursor.fetchall()]
+                
+                # Delete transactions
+                for transaction_id in transaction_ids:
+                    cursor.execute("""
+                    DELETE FROM workflow_states 
+                    WHERE transaction_id = ?
+                    """, (transaction_id,))
+                    
+                    # Remove from in-memory storage
+                    if transaction_id in self._in_memory_states:
+                        del self._in_memory_states[transaction_id]
+                        
+                conn.commit()
+                
+                logger.info(f"Cleaned up {len(transaction_ids)} old transactions")
+                return len(transaction_ids)
+                
+        except Exception as e:
+            logger.error(f"Failed to clean up old transactions: {e}")
+            return 0
+    
+    @handle_safely
+    def apply_state_transition(
         self, 
-        workflow_id: str, 
-        change_func: Callable[[WorkflowState], WorkflowState]
+        state: WorkflowState, 
+        transition: Union[Callable[[WorkflowState], WorkflowState], str, Dict[str, Any]]
     ) -> WorkflowState:
         """
-        Apply a change function to workflow state.
+        Apply a transition to a state.
         
         Args:
-            workflow_id: Workflow ID
-            change_func: Function that takes a state and returns a new state
-            
+            state: Current workflow state
+            transition: Transition to apply:
+                - Function that takes and returns a WorkflowState
+                - String method name to call on the state
+                - Dict of attributes to update
+                
         Returns:
             Updated workflow state
             
         Raises:
-            StateError: If state change fails
+            StateError: If transition is invalid
         """
-        async with self._lock:
+        if callable(transition):
+            # Function transition
+            new_state = transition(state)
+        elif isinstance(transition, str):
+            # Method name transition
+            if not hasattr(state, transition) or not callable(getattr(state, transition)):
+                raise StateError(f"Invalid state transition method: {transition}")
+                
+            method = getattr(state, transition)
+            new_state = method()
+        elif isinstance(transition, dict):
+            # Attribute update transition
+            new_state = state.evolve(**transition)
+        else:
+            raise StateError(f"Invalid state transition type: {type(transition)}")
+            
+        # Update the state
+        return self.update_state(new_state)
+    
+    async def wait_for_state_condition(
+        self, 
+        transaction_id: str, 
+        condition: Callable[[WorkflowState], bool],
+        timeout_seconds: float = 60.0,
+        poll_interval_seconds: float = 0.5
+    ) -> Optional[WorkflowState]:
+        """
+        Wait for a state to meet a condition.
+        
+        Args:
+            transaction_id: Transaction ID
+            condition: Function that takes a state and returns True when condition is met
+            timeout_seconds: Maximum time to wait in seconds
+            poll_interval_seconds: How often to check the condition
+            
+        Returns:
+            State that meets the condition or None if timed out
+        """
+        start_time = time.time()
+        
+        while time.time() - start_time < timeout_seconds:
             # Get current state
-            state = await self.get_state(workflow_id)
+            state = self.get_active_state(transaction_id)
             
-            if not state:
-                raise StateError(f"Workflow {workflow_id} not found")
+            if state and condition(state):
+                return state
                 
-            # Apply change
-            new_state = change_func(state)
+            # Wait before checking again
+            await asyncio.sleep(poll_interval_seconds)
             
-            # Update state
-            return await self.update_state(workflow_id, new_state)
-    
-    async def list_active_workflows(self) -> List[str]:
-        """
-        List active workflow IDs.
-        
-        Returns:
-            List of active workflow IDs
-        """
-        active_statuses = [
-            WorkflowStatus.PENDING,
-            WorkflowStatus.RUNNING,
-            WorkflowStatus.VALIDATING,
-            WorkflowStatus.GENERATING,
-            WorkflowStatus.EXECUTING,
-            WorkflowStatus.VERIFYING,
-            WorkflowStatus.PAUSED,
-            WorkflowStatus.WAITING,
-            WorkflowStatus.RETRYING
-        ]
-        
-        active_workflows = set()
-        
-        # Add known active workflows from memory
-        for workflow_id, state in self.active_states.items():
-            if state.status in active_statuses:
-                active_workflows.add(workflow_id)
-                
-        # Check storage for each status
-        for status in active_statuses:
-            workflows = await self.storage.list_workflows(status)
-            active_workflows.update(workflows)
-            
-        return list(active_workflows)
-    
-    async def get_workflow_events(self, workflow_id: str) -> List[StateEvent]:
-        """
-        Get all events for a workflow.
-        
-        Args:
-            workflow_id: Workflow ID
-            
-        Returns:
-            List of events in chronological order
-        """
-        return await self.storage.get_events(workflow_id)
-    
-    async def clear_inactive_workflows(self, max_age_hours: int = 24) -> int:
-        """
-        Clear inactive workflows from memory cache.
-        
-        Args:
-            max_age_hours: Maximum age in hours
-            
-        Returns:
-            Number of workflows cleared
-        """
-        inactive_statuses = [
-            WorkflowStatus.COMPLETED,
-            WorkflowStatus.FAILED,
-            WorkflowStatus.REVERTED
-        ]
-        
-        workflows_to_clear = []
-        now = datetime.now()
-        
-        async with self._lock:
-            for workflow_id, state in self.active_states.items():
-                if state.status in inactive_statuses:
-                    # Calculate age
-                    age = now - state.last_updated
-                    
-                    if age.total_seconds() > max_age_hours * 3600:
-                        workflows_to_clear.append(workflow_id)
-                        
-            # Clear workflows
-            for workflow_id in workflows_to_clear:
-                self.active_states.pop(workflow_id, None)
-                
-        logger.info(f"Cleared {len(workflows_to_clear)} inactive workflows from memory")
-        return len(workflows_to_clear)
-    
-    async def cleanup(self) -> None:
-        """Clean up resources."""
-        # Clear observers
-        self.observers.clear()
-        
-        # Clear active states
-        self.active_states.clear()
+        return None

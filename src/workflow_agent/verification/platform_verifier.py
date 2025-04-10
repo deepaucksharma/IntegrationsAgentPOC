@@ -14,7 +14,7 @@ import asyncio
 
 from ..core.state import WorkflowState, Change
 from ..error.exceptions import VerificationError
-from ..utils.error_handling import async_handle_errors
+from ..error.handler import ErrorHandler, handle_safely_async
 
 logger = logging.getLogger(__name__)
 

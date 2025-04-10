@@ -96,6 +96,10 @@ class VerificationError(WorkflowError):
     """Error during verification."""
     pass
 
+class AgentError(WorkflowError):
+    """Error in agent execution."""
+    pass
+
 class LLMError(WorkflowError):
     """Error in LLM interaction."""
     pass
