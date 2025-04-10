@@ -1065,7 +1065,7 @@ class VerificationManager:
     
     async def _analyze_diagnostic_results(self, diagnostic_results: List[Dict[str, Any]], state: WorkflowState) -> Dict[str, Any]:
         """
-        Analyze diagnostic results using LLM.
+        Analyze diagnostic results using the consolidated analysis manager.
         
         Args:
             diagnostic_results: Results from diagnostic steps
@@ -1074,45 +1074,33 @@ class VerificationManager:
         Returns:
             Analysis of diagnostic results
         """
-        # Prepare prompt for LLM
-        prompt = f"""
-        Analyze the results of diagnostic steps performed for a New Relic {state.integration_type} integration that failed verification.
+        # Import the consolidated analysis manager
+        from .analysis_manager import VerificationAnalysisManager
         
-        Diagnostic results:
-        {json.dumps(diagnostic_results, indent=2)}
+        # Create the analysis manager if not already set up
+        analysis_manager = VerificationAnalysisManager(self.llm_service)
         
-        Integration details:
-        - Type: {state.integration_type}
-        - Target name: {state.target_name}
+        # Extract the steps from diagnostic results
+        passed_steps = [step for step in diagnostic_results if step.get("success", False)]
+        failed_steps = [step for step in diagnostic_results if not step.get("success", False)]
+        total_steps = len(diagnostic_results)
         
-        Based on these diagnostic results:
-        1. What are the key findings?
-        2. What are the possible issues causing the verification failure?
-        3. What recommendations would you make to fix the issues?
+        # Prepare context information
+        context = {
+            "integration_type": state.integration_type,
+            "target_name": state.target_name,
+            "parameters": state.parameters,
+            "workflow_id": getattr(state, "workflow_id", None)
+        }
         
-        Format your response as a JSON object with these keys:
-        - findings: Array of key findings from the diagnostics
-        - possible_issues: Array of possible root causes
-        - recommendations: Array of recommended actions to resolve the issues
-        """
-        
-        try:
-            # Generate analysis using LLM
-            analysis = await self.llm_service.generate_json(
-                prompt=prompt,
-                system_prompt="You are an expert in diagnosing integration issues based on diagnostic information.",
-                temperature=0.2
-            )
-            
-            return analysis
-            
-        except Exception as e:
-            logger.warning(f"Error analyzing diagnostic results: {e}")
-            return {
-                "findings": ["Unable to analyze diagnostic results"],
-                "possible_issues": ["Unknown"],
-                "recommendations": ["Investigate manually"]
-            }
+        # Use the consolidated analysis method with diagnostic type
+        return await analysis_manager.analyze_verification_results(
+            passed_steps=passed_steps,
+            failed_steps=failed_steps,
+            total_steps=total_steps,
+            context=context,
+            analysis_type="diagnostic"
+        )
     
     async def _analyze_verification_results(
         self, 
@@ -1123,131 +1111,37 @@ class VerificationManager:
         verification_type: str
     ) -> Dict[str, Any]:
         """
-        Analyze verification results using LLM.
+        Analyze verification results using the consolidated analysis manager.
         
         Args:
             passed_steps: Steps that passed
             failed_steps: Steps that failed
             total_steps: Total number of steps
             state: Workflow state
-            verification_type: Type of verification (verification, clean_verification, uninstall_verification)
+            verification_type: Type of verification
             
         Returns:
             Analysis of verification results
         """
-        # Prepare context for LLM
-        success_rate = len(passed_steps) / total_steps if total_steps > 0 else 0
-        critical_failures = [step for step in failed_steps if step.get("required", True)]
+        # Import the consolidated analysis manager
+        from .analysis_manager import VerificationAnalysisManager
         
-        # Customize prompt based on verification type
-        purpose = {
-            "verification": "integration installation verification",
-            "clean_verification": "system clean state verification after rollback",
-            "uninstall_verification": "integration uninstallation verification"
-        }.get(verification_type, "verification")
+        # Create the analysis manager if not already set up
+        analysis_manager = VerificationAnalysisManager(self.llm_service)
         
-        # Prepare prompt for LLM
-        prompt = f"""
-        Analyze the results of {purpose} for a New Relic {state.integration_type} integration.
+        # Prepare context information
+        context = {
+            "integration_type": state.integration_type,
+            "target_name": state.target_name,
+            "parameters": state.parameters,
+            "workflow_id": getattr(state, "workflow_id", None)
+        }
         
-        Verification summary:
-        - Total steps: {total_steps}
-        - Passed steps: {len(passed_steps)}
-        - Failed steps: {len(failed_steps)}
-        - Success rate: {success_rate:.2%}
-        - Critical failures: {len(critical_failures)}
-        
-        Passed steps:
-        {json.dumps(passed_steps, indent=2)[:2000]}  # Limit for token reasons
-        
-        Failed steps:
-        {json.dumps(failed_steps, indent=2)[:2000]}  # Limit for token reasons
-        
-        Integration details:
-        - Type: {state.integration_type}
-        - Target name: {state.target_name}
-        
-        Based on these verification results, analyze:
-        1. Is the {purpose.split()[0]} successful overall?
-        2. What are the key issues, if any?
-        3. How critical are the failed steps?
-        4. What might be causing the failures?
-        5. What next steps would you recommend?
-        
-        Format your response as a JSON object with these keys:
-        """
-        
-        # Add verification-specific fields
-        if verification_type == "verification":
-            prompt += """
-        - verification_successful: Boolean indicating if verification is successful overall
-        - critical_issues: Boolean indicating if there are any critical issues
-        - issues: Array of identified issues
-        - impact: Description of the impact of any issues
-        - recommendations: Array of recommended actions
-        - reasoning: Explanation of your assessment
-        """
-        elif verification_type == "clean_verification":
-            prompt += """
-        - system_clean: Boolean indicating if the system is clean
-        - remaining_artifacts: Array of any remaining artifacts
-        - impact: Description of the impact of any remaining artifacts
-        - recommendations: Array of recommended cleanup actions
-        - reasoning: Explanation of your assessment
-        """
-        elif verification_type == "uninstall_verification":
-            prompt += """
-        - uninstall_successful: Boolean indicating if uninstallation was successful
-        - critical_issues: Boolean indicating if there are critical issues
-        - remaining_components: Array of remaining components
-        - impact: Description of the impact of any remaining components
-        - recommendations: Array of recommended cleanup actions
-        - reasoning: Explanation of your assessment
-        """
-        
-        try:
-            # Generate analysis using LLM
-            analysis = await self.llm_service.generate_json(
-                prompt=prompt,
-                system_prompt=f"You are an expert in analyzing {purpose} results and providing actionable insights.",
-                temperature=0.2
-            )
-            
-            return analysis
-            
-        except Exception as e:
-            logger.warning(f"Error analyzing verification results: {e}")
-            
-            # Return basic analysis based on verification type
-            if verification_type == "verification":
-                return {
-                    "verification_successful": len(critical_failures) == 0,
-                    "critical_issues": len(critical_failures) > 0,
-                    "issues": [step.get("error", "Unknown error") for step in failed_steps],
-                    "impact": "Unknown impact",
-                    "recommendations": ["Investigate failed steps manually"],
-                    "reasoning": "Basic analysis due to LLM error"
-                }
-            elif verification_type == "clean_verification":
-                return {
-                    "system_clean": len(failed_steps) == 0,
-                    "remaining_artifacts": [step.get("name", "Unknown") for step in failed_steps],
-                    "impact": "Potential system artifacts remaining",
-                    "recommendations": ["Manually clean up remaining artifacts"],
-                    "reasoning": "Basic analysis due to LLM error"
-                }
-            elif verification_type == "uninstall_verification":
-                return {
-                    "uninstall_successful": len(critical_failures) == 0,
-                    "critical_issues": len(critical_failures) > 0,
-                    "remaining_components": [step.get("name", "Unknown") for step in failed_steps],
-                    "impact": "Potential integration components remaining",
-                    "recommendations": ["Manually remove remaining components"],
-                    "reasoning": "Basic analysis due to LLM error"
-                }
-            else:
-                return {
-                    "success": len(critical_failures) == 0,
-                    "issues": [step.get("error", "Unknown error") for step in failed_steps],
-                    "reasoning": "Basic analysis due to LLM error"
-                }
+        # Use the consolidated analysis method
+        return await analysis_manager.analyze_verification_results(
+            passed_steps=passed_steps,
+            failed_steps=failed_steps,
+            total_steps=total_steps,
+            context=context,
+            analysis_type=verification_type
+        )

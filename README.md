@@ -10,6 +10,19 @@ This documentation is structured across several focused README files:
 4.  **[Data Flow](data-flow-readme.md)**: Information flow throughout the workflow lifecycle
 5.  **[Developer Setup & Troubleshooting](developer-readme.md)**: Setup instructions, common issues, and debugging tips
 6.  **[Recent Fixes & Improvements](FIXED.md)**: Summary of critical issues addressed in recent updates
+7.  **[Cleanup Notes](docs/CLEANUP-NOTES.md)**: Documentation of recent code cleanup and refactoring efforts
+
+## Recent Code Improvements
+
+The codebase has undergone significant improvements to enhance maintainability and reduce redundancy:
+
+1. **Consolidated Agent Implementation**: Unified the base agent classes into a single implementation supporting both standalone and message bus paradigms
+2. **Enhanced Change Tracking**: Added dedicated `ChangeTracker` for more reliable system change detection and rollback
+3. **Optimized Service Container**: Improved service registration with consolidated methods and better error handling
+4. **Improved Integration Registry**: Added duplicate detection to prevent redundant integration registrations
+5. **Verification Analysis Consolidation**: Centralized LLM-driven analysis for consistent verification outcomes
+
+See the [Cleanup Notes](docs/CLEANUP-NOTES.md) for detailed information about these changes.
 
 ## Agentic Workflow 
 
@@ -157,43 +170,20 @@ def validate_script_security(script_content: str) -> Dict[str, Any]:
 ### Enhanced Change Tracking for Reliable Rollback
 
 ```python
-def _extract_changes(self, output: str) -> List[Change]:
+def extract_changes(self, output: str) -> List[Change]:
     """
-    Extract changes from script output with enhanced structured change tracking.
-    """
-    changes = []
+    Extract changes from script output using the consolidated ChangeTracker.
     
-    # Process JSON change blocks for reliable tracking
-    json_change_blocks = re.findall(r"CHANGE_JSON_BEGIN\s*(.*?)\s*CHANGE_JSON_END", output, re.DOTALL)
-    
-    for json_block in json_change_blocks:
-        try:
-            change_data = json.loads(json_block)
-            
-            # Handle both single change and array of changes
-            if isinstance(change_data, list):
-                for item in change_data:
-                    self._process_change_item(item, changes)
-            else:
-                self._process_change_item(change_data, changes)
-                
-        except json.JSONDecodeError:
-            logger.warning(f"Failed to parse JSON change block: {json_block[:100]}")
-    
-    # Fallback to structured change markers if no JSON
-    # ... [additional structured parsing]
-    
-    # If we couldn't parse any changes but have output, try to infer changes
-    if not changes and len(output) > 0:
-        # Look for common installation patterns
-        package_patterns = [
-            r"(?:installed|Installing)\s+(?:package|module)\s+(\S+)",
-            r"(?:apt-get|yum|dnf|pip)\s+install.*?(\S+)"
-        ]
+    Args:
+        output: Script output to parse
         
-        # ... [additional inference logic]
-    
-    return changes
+    Returns:
+        List of Change objects
+    """
+    # Using the consolidated ChangeTracker
+    from .change_tracker import ChangeTracker
+    tracker = ChangeTracker()
+    return tracker.extract_changes(output)
 ```
 
 ---
@@ -225,3 +215,17 @@ For security best practices:
 - Never commit API keys to version control
 - Use separate API keys for development and production
 - Rotate API keys periodically
+
+## Code Structure
+
+The project follows a modular architecture with the following key components:
+
+- **agent**: Base agent implementations and agent-related functionality
+- **core**: Core functionality including state management and service container
+- **execution**: Script execution and change tracking
+- **integrations**: Integration definitions and registration
+- **llm**: LLM service integration and prompt handling
+- **templates**: Template rendering and management
+- **verification**: Verification steps and analysis
+
+Recent restructuring has consolidated several components to reduce redundancy and improve maintainability. See the [Cleanup Notes](docs/CLEANUP-NOTES.md) for details.

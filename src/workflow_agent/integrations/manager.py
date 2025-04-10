@@ -57,20 +57,31 @@ class IntegrationManager:
             logger.info(f"Discovered {plugin_count} integration plugins")
         
     def _discover_built_in_integrations(self) -> None:
-        """Discover and register built-in integrations."""
-        # Get all integration submodules - we'll use a more reliable approach here
+        """
+        Discover and register built-in integrations using a consolidated approach.
+        This method prevents duplicate registrations by using the registry's duplicate detection.
+        """
         try:
-            from . import custom, infra_agent
+            # Approach 1: Direct import of known integration packages
+            integration_packages = []
             
-            # Register base implementations
-            for package in [custom, infra_agent]:
+            # Import the core integration packages
+            try:
+                from . import custom, infra_agent
+                integration_packages.extend([custom, infra_agent])
+            except ImportError as e:
+                logger.warning(f"Could not import core integration packages: {e}")
+            
+            # Process each package
+            for package in integration_packages:
                 module_name = package.__name__
                 if module_name in self._loaded_modules:
                     continue
                     
                 self._loaded_modules.add(module_name)
+                logger.debug(f"Processing integration package: {module_name}")
                 
-                # Look for integration classes
+                # Look for integration classes in the package
                 for name, obj in inspect.getmembers(package):
                     if (inspect.isclass(obj) and 
                             issubclass(obj, IntegrationBase) and 
@@ -78,10 +89,15 @@ class IntegrationManager:
                             not inspect.isabstract(obj)):
                         self.registry.register(obj)
             
-            # Also try automatic discovery using the IntegrationBase method
-            for impl_class in IntegrationBase.discover_implementations():
+            # Approach 2: Use the IntegrationBase discovery mechanism
+            # This is a backup mechanism and may find the same integrations,
+            # but the registry handles duplicates appropriately
+            discovered = IntegrationBase.discover_implementations()
+            for impl_class in discovered:
                 self.registry.register(impl_class)
                 
+            logger.info(f"Discovered {len(self.registry.list_integrations())} built-in integrations")
+            
         except Exception as e:
             logger.error(f"Error discovering built-in integrations: {e}", exc_info=True)
     

@@ -128,37 +128,51 @@ class ServiceContainer:
         self.metadata: Dict[str, ServiceMetadata] = {}
         self.tag_registry: Dict[str, List[str]] = {}
         
-    def register_singleton(
+    def register_service(
         self, 
         name: str, 
         service_type: Type[T], 
-        *args, 
+        provider_type: str = "singleton",
+        instance: Optional[Any] = None,
+        *args,
         tags: List[str] = None,
         **kwargs
     ) -> None:
         """
-        Register a singleton service with enhanced metadata.
+        Consolidated service registration method.
         
         Args:
             name: Service name
             service_type: Service type
+            provider_type: Provider type (singleton, factory, instance)
+            instance: Pre-created instance (for instance provider)
             tags: Optional list of tags for service discovery
             *args: Arguments for service initialization
             **kwargs: Keyword arguments for service initialization
         """
-        # Extract dependencies from constructor
-        dependencies = self._extract_dependencies(service_type)
+        # Extract dependencies from constructor (except for instance provider)
+        dependencies = []
+        if provider_type != "instance":
+            dependencies = self._extract_dependencies(service_type)
         
         # Create metadata
         metadata = ServiceMetadata(
-            service_type=service_type,
+            service_type=service_type if provider_type != "instance" else type(instance),
             name=name,
             tags=tags or [],
             dependencies=[dep.name for dep in dependencies],
+            lifecycle=ServiceLifecycle.ACTIVE if provider_type == "instance" else ServiceLifecycle.UNINITIALIZED
         )
         
         # Register provider with dependency container
-        self.container.register_singleton(name, service_type, *args, **kwargs)
+        if provider_type == "singleton":
+            self.container.register_singleton(name, service_type, *args, **kwargs)
+        elif provider_type == "factory":
+            self.container.register_factory(name, service_type, *args, **kwargs)
+        elif provider_type == "instance":
+            self.container.register_instance(name, instance)
+        else:
+            raise ValueError(f"Unknown provider type: {provider_type}")
         
         # Wrap with tracked provider
         provider = self.container.providers[name]
@@ -172,97 +186,24 @@ class ServiceContainer:
             if tag not in self.tag_registry:
                 self.tag_registry[tag] = []
             self.tag_registry[tag].append(name)
+        
+        # Mark instance provider as active since it's pre-initialized
+        if provider_type == "instance":
+            metadata.mark_active()
             
-        logger.debug(f"Registered singleton service: {name} ({service_type.__name__})")
+        logger.debug(f"Registered {provider_type} service: {name} ({metadata.service_type.__name__})")
+
+    def register_singleton(self, name: str, service_type: Type[T], *args, tags: List[str] = None, **kwargs) -> None:
+        """Register a singleton service (convenience method)."""
+        self.register_service(name, service_type, "singleton", None, *args, tags=tags, **kwargs)
         
-    def register_factory(
-        self, 
-        name: str, 
-        service_type: Type[T], 
-        *args, 
-        tags: List[str] = None,
-        **kwargs
-    ) -> None:
-        """
-        Register a factory service with enhanced metadata.
+    def register_factory(self, name: str, service_type: Type[T], *args, tags: List[str] = None, **kwargs) -> None:
+        """Register a factory service (convenience method)."""
+        self.register_service(name, service_type, "factory", None, *args, tags=tags, **kwargs)
         
-        Args:
-            name: Service name
-            service_type: Service type
-            tags: Optional list of tags for service discovery
-            *args: Arguments for service initialization
-            **kwargs: Keyword arguments for service initialization
-        """
-        # Extract dependencies from constructor
-        dependencies = self._extract_dependencies(service_type)
-        
-        # Create metadata
-        metadata = ServiceMetadata(
-            service_type=service_type,
-            name=name,
-            tags=tags or [],
-            dependencies=[dep.name for dep in dependencies],
-        )
-        
-        # Register provider with dependency container
-        self.container.register_factory(name, service_type, *args, **kwargs)
-        
-        # Wrap with tracked provider
-        provider = self.container.providers[name]
-        self.container.providers[name] = TrackedProvider(provider, metadata)
-        
-        # Store metadata
-        self.metadata[name] = metadata
-        
-        # Register tags
-        for tag in metadata.tags:
-            if tag not in self.tag_registry:
-                self.tag_registry[tag] = []
-            self.tag_registry[tag].append(name)
-            
-        logger.debug(f"Registered factory service: {name} ({service_type.__name__})")
-        
-    def register_instance(
-        self, 
-        name: str, 
-        instance: T, 
-        tags: List[str] = None
-    ) -> None:
-        """
-        Register a pre-created instance with enhanced metadata.
-        
-        Args:
-            name: Service name
-            instance: Service instance
-            tags: Optional list of tags for service discovery
-        """
-        # Create metadata
-        metadata = ServiceMetadata(
-            service_type=type(instance),
-            name=name,
-            tags=tags or [],
-            dependencies=[],
-            lifecycle=ServiceLifecycle.ACTIVE  # Already initialized
-        )
-        
-        # Register provider with dependency container
-        self.container.register_instance(name, instance)
-        
-        # Wrap with tracked provider
-        provider = self.container.providers[name]
-        self.container.providers[name] = TrackedProvider(provider, metadata)
-        
-        # Store metadata
-        self.metadata[name] = metadata
-        
-        # Register tags
-        for tag in metadata.tags:
-            if tag not in self.tag_registry:
-                self.tag_registry[tag] = []
-            self.tag_registry[tag].append(name)
-            
-        metadata.mark_active()  # Mark as active since it's pre-initialized
-        logger.debug(f"Registered instance service: {name} ({type(instance).__name__})")
+    def register_instance(self, name: str, instance: Any, tags: List[str] = None) -> None:
+        """Register a pre-created instance (convenience method)."""
+        self.register_service(name, type(instance), "instance", instance, tags=tags)
         
     def get(self, name: str) -> Any:
         """

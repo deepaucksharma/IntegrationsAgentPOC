@@ -35,7 +35,7 @@ class IntegrationRegistry:
         
     def register(self, integration_class: Type[IntegrationBase]) -> None:
         """
-        Register an integration class.
+        Register an integration class with duplicate detection.
         
         Args:
             integration_class: Integration class to register
@@ -62,13 +62,26 @@ class IntegrationRegistry:
             if not name:
                 raise RegistrationError(f"Integration {integration_class.__name__} has no name")
                 
+            # Check for duplicate registration - compare class object identity
+            name_lower = name.lower()
+            if name_lower in self._integrations:
+                existing_class = self._integrations[name_lower]
+                if existing_class == integration_class:
+                    logger.debug(f"Skipping duplicate registration of {name}")
+                    return
+                else:
+                    logger.warning(
+                        f"Replacing existing integration {name} ({existing_class.__name__}) "
+                        f"with {integration_class.__name__}"
+                    )
+                
             # Register the integration
             logger.debug(f"Registering integration: {name}")
-            self._integrations[name.lower()] = integration_class
+            self._integrations[name_lower] = integration_class
             
             # Clear cached instance if exists
-            if name.lower() in self._instances:
-                del self._instances[name.lower()]
+            if name_lower in self._instances:
+                del self._instances[name_lower]
                 
         except Exception as e:
             if isinstance(e, RegistrationError):
