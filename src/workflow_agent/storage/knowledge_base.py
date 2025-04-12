@@ -1,152 +1,203 @@
 """
-Knowledge base for storing integration documentation and improvements.
+Enhanced knowledge base implementation that leverages caching and better search.
+This implementation is a wrapper around the EnhancedKnowledgeBase from knowledge_cache.py.
 """
-import os
 import logging
+import os
 import json
-import tempfile
-from pathlib import Path
-from typing import Dict, Any, List, Optional
+import yaml
+from typing import Dict, Any, List, Optional, Union
 import asyncio
+from pathlib import Path
+
+from .knowledge_cache import EnhancedKnowledgeBase
 
 logger = logging.getLogger(__name__)
 
 class KnowledgeBase:
-    """Storage for integration documentation and learning data."""
+    """
+    Knowledge base with enhanced caching, search, and real-time updates.
+    Provides backward compatibility with older code while adding enhanced features.
+    """
     
-    def __init__(self, storage_path: Optional[str] = None):
-        self.storage_path = storage_path or os.path.join(os.path.dirname(__file__), "knowledge")
-        self.documents = {}
-        self.improvements = {}
-        self._lock = asyncio.Lock()
-    
+    def __init__(self, storage_dir: Optional[str] = None, cache_enabled: bool = True):
+        """
+        Initialize knowledge base.
+        
+        Args:
+            storage_dir: Directory for knowledge storage
+            cache_enabled: Whether to enable caching
+        """
+        self.enhanced_kb = EnhancedKnowledgeBase(storage_dir, cache_enabled)
+        self._initialized = False
+        
     async def initialize(self) -> None:
         """Initialize the knowledge base."""
-        try:
-            os.makedirs(self.storage_path, exist_ok=True)
-        except Exception as e:
-            logger.error(f"Error creating knowledge base directory: {e}")
-            self.storage_path = tempfile.mkdtemp(prefix="workflow_kb_")
-            logger.warning(f"Using temporary directory: {self.storage_path}")
+        if not self._initialized:
+            await self.enhanced_kb.initialize()
+            self._initialized = True
+        
+    async def retrieve_documents(self, 
+                                integration_type: str, 
+                                target_name: Optional[str] = None, 
+                                action: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Retrieve documents for a specific integration type.
+        
+        Args:
+            integration_type: Integration type
+            target_name: Optional target name
+            action: Optional action
             
-        docs_path = os.path.join(self.storage_path, "documents.json")
-        if os.path.exists(docs_path):
-            try:
-                with open(docs_path, "r") as f:
-                    self.documents = json.load(f)
-                logger.info(f"Loaded {len(self.documents)} documents from knowledge base")
-            except Exception as e:
-                logger.error(f"Error loading documents: {e}")
-        improvements_path = os.path.join(self.storage_path, "improvements.json")
-        if os.path.exists(improvements_path):
-            try:
-                with open(improvements_path, "r") as f:
-                    self.improvements = json.load(f)
-                logger.info(f"Loaded improvements for {len(self.improvements)} integrations")
-            except Exception as e:
-                logger.error(f"Error loading improvements: {e}")
-    
-    async def add_document(self, integration_type: str, target_name: str, doc_type: str, content: Dict[str, Any]) -> None:
-        """Add a document to the knowledge base."""
-        key = f"{integration_type}_{target_name}_{doc_type}"
-        async with self._lock:
-            self.documents[key] = content
-            try:
-                docs_path = os.path.join(self.storage_path, "documents.json")
-                with open(docs_path, "w") as f:
-                    json.dump(self.documents, f, indent=2)
-            except Exception as e:
-                logger.error(f"Error saving documents: {e}")
-    
-    async def retrieve_documents(
-        self,
-        integration_type: str,
-        target_name: str,
-        action: str = None
-    ) -> Optional[Dict[str, Any]]:
-        """Retrieve documents for an integration."""
-        try:
-            # Check if documents exist for this integration
-            key_prefix = f"{integration_type}_{target_name}_"
-            result = {}
+        Returns:
+            Dictionary of documents
+        """
+        if not self._initialized:
+            await self.initialize()
             
-            # Find all documents for this integration
-            for doc_key, content in self.documents.items():
-                if doc_key.startswith(key_prefix):
-                    doc_type = doc_key[len(key_prefix):] if len(key_prefix) < len(doc_key) else "default"
-                    result[doc_type] = content
+        return await self.enhanced_kb.retrieve_documents(integration_type, target_name, action)
+        
+    async def add_document(self, 
+                          integration_type: str, 
+                          target_name: str, 
+                          doc_type: str, 
+                          content: Dict[str, Any],
+                          source: Optional[str] = None) -> bool:
+        """
+        Add a document to the knowledge base.
+        
+        Args:
+            integration_type: Integration type
+            target_name: Target name
+            doc_type: Document type (definition, installation, etc.)
+            content: Document content
+            source: Optional source information
             
-            # If no documents found, return a basic definition
-            if not result:
-                return {
-                    "definition": {
-                        "name": target_name,
-                        "type": integration_type,
-                        "actions": [action] if action else []
-                    }
-                }
+        Returns:
+            True if document was added
+        """
+        if not self._initialized:
+            await self.initialize()
             
-            # Add basic definition info if not present
-            if "definition" not in result:
-                result["definition"] = {
-                    "name": target_name,
-                    "type": integration_type,
-                    "actions": [action] if action else []
-                }
-                
-            return result
-        except Exception as e:
-            logger.error(f"Error retrieving documents for {integration_type}_{target_name}: {e}")
-            raise
-    
-    async def get_all_documents(self, integration_type: Optional[str] = None) -> Dict[str, Any]:
-        """Get all documents, optionally filtered by integration type."""
-        if not integration_type:
-            return self.documents
-        return {
-            k: v
-            for k, v in self.documents.items()
-            if k.startswith(f"{integration_type}_")
-        }
-    
-    async def add_improvement(self, integration_type: str, target_name: str, improvement: Dict[str, Any]) -> None:
-        """Add an improvement to the knowledge base."""
-        key = f"{integration_type}_{target_name}"
-        async with self._lock:
-            if key not in self.improvements:
-                self.improvements[key] = []
-            self.improvements[key].append(improvement)
-            try:
-                improvements_path = os.path.join(self.storage_path, "improvements.json")
-                with open(improvements_path, "w") as f:
-                    json.dump(self.improvements, f, indent=2)
-            except Exception as e:
-                logger.error(f"Error saving improvements: {e}")
-    
-    async def get_improvements(self, integration_type: str, target_name: str) -> List[Dict[str, Any]]:
-        """Get improvements for an integration."""
-        key = f"{integration_type}_{target_name}"
-        return self.improvements.get(key, [])
-    
-    async def query(self, query: str, context: Dict[str, Any]) -> Dict[str, Any]:
-        """Query the knowledge base."""
-        result = {"query": query, "results": []}
-        integration_type = context.get("integration_type")
-        target_name = context.get("target_name")
-        if integration_type and target_name:
-            docs = await self.retrieve_documents(integration_type, target_name)
-            if docs:
-                result["results"].append({"source": "integration_docs", "content": docs})
-            improvements = await self.get_improvements(integration_type, target_name)
-            if improvements:
-                result["results"].append({"source": "improvements", "content": improvements})
-        # Minimal textual search across docs
-        search_term = query.lower()
-        for doc_key, doc_content in self.documents.items():
-            text = json.dumps(doc_content).lower()
-            if search_term in text:
-                result["results"].append({
-                    "source": f"doc:{doc_key}",
-                    "content": doc_content
-                })
-        return result
+        return await self.enhanced_kb.add_document(integration_type, target_name, doc_type, content, source)
+        
+    async def update_knowledge(self, 
+                              integration_type: str, 
+                              knowledge_update: Dict[str, Any],
+                              source: Optional[str] = None) -> bool:
+        """
+        Update knowledge for an integration type.
+        
+        Args:
+            integration_type: Integration type
+            knowledge_update: Updated knowledge
+            source: Optional source information
+            
+        Returns:
+            True if update was successful
+        """
+        if not self._initialized:
+            await self.initialize()
+            
+        return await self.enhanced_kb.update_knowledge(integration_type, knowledge_update, source)
+        
+    async def search_knowledge(self, 
+                              query: str, 
+                              context: Optional[Dict[str, Any]] = None, 
+                              max_results: int = 5) -> List[Dict[str, Any]]:
+        """
+        Search for knowledge using a query string.
+        
+        Args:
+            query: Search query
+            context: Optional search context
+            max_results: Maximum number of results
+            
+        Returns:
+            List of matching knowledge items
+        """
+        if not self._initialized:
+            await self.initialize()
+            
+        return await self.enhanced_kb.retrieve_knowledge(query, context, max_results)
+        
+    async def get_integration_knowledge(self, integration_type: str) -> Optional[Dict[str, Any]]:
+        """
+        Get preloaded knowledge for an integration type.
+        
+        Args:
+            integration_type: Integration type
+            
+        Returns:
+            Preloaded knowledge or None if not found
+        """
+        if not self._initialized:
+            await self.initialize()
+            
+        # Try to get from cache
+        knowledge = await self.enhanced_kb.cache.get_integration_knowledge(integration_type)
+        if knowledge:
+            return knowledge
+            
+        # Retrieve from storage
+        return await self.retrieve_documents(integration_type)
+        
+    async def preload_integration(self, integration_type: str) -> bool:
+        """
+        Preload knowledge for an integration type.
+        
+        Args:
+            integration_type: Integration type
+            
+        Returns:
+            True if preloading was successful
+        """
+        if not self._initialized:
+            await self.initialize()
+            
+        # Retrieve documents
+        docs = await self.retrieve_documents(integration_type)
+        
+        # Preload into cache
+        if docs and self.enhanced_kb.cache:
+            await self.enhanced_kb.cache.preload_knowledge(integration_type, docs)
+            return True
+            
+        return False
+        
+    async def clear_cache(self) -> None:
+        """Clear all caches."""
+        if self._initialized and self.enhanced_kb.cache:
+            await self.enhanced_kb.cache.clear()
+            
+    async def invalidate_cache_for_integration(self, integration_type: str) -> None:
+        """
+        Invalidate cache for a specific integration.
+        
+        Args:
+            integration_type: Integration type
+        """
+        if self._initialized and self.enhanced_kb.cache:
+            await self.enhanced_kb.cache.invalidate_for_integration(integration_type)
+            
+    async def get_all_integration_types(self) -> List[str]:
+        """
+        Get all integration types in the knowledge base.
+        
+        Returns:
+            List of integration types
+        """
+        if not self._initialized:
+            await self.initialize()
+            
+        # Get integration types from storage directory
+        storage_dir = self.enhanced_kb.storage_dir
+        integration_types = []
+        
+        if os.path.exists(storage_dir):
+            for entry in os.listdir(storage_dir):
+                entry_path = os.path.join(storage_dir, entry)
+                if os.path.isdir(entry_path) and entry != "common":
+                    integration_types.append(entry)
+                    
+        return integration_types

@@ -11,6 +11,58 @@ from ..core.state import WorkflowState
 
 logger = logging.getLogger(__name__)
 
+class ScriptBuilderAgentInterface(MultiAgentBase):
+    """
+    Interface for script generation and validation agents.
+    
+    ScriptBuilder agents are responsible for:
+    1. Generating scripts based on workflow state
+    2. Validating scripts for correctness and safety
+    3. Optimizing scripts for specific environments
+    """
+    
+    @abstractmethod
+    async def generate_script(self, state: WorkflowState, config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """
+        Generate a script based on workflow state.
+        
+        Args:
+            state: Current workflow state
+            config: Additional configuration options
+            
+        Returns:
+            Dictionary containing the generated script and related metadata
+        """
+        pass
+    
+    @abstractmethod
+    async def validate_script(self, state: WorkflowState, config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """
+        Validate a script for correctness and safety.
+        
+        Args:
+            state: Current workflow state containing script
+            config: Additional configuration options
+            
+        Returns:
+            Validation results
+        """
+        pass
+    
+    @abstractmethod
+    async def optimize_script(self, state: WorkflowState, target_env: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Optimize a script for a specific environment.
+        
+        Args:
+            state: Current workflow state containing script
+            target_env: Target environment details
+            
+        Returns:
+            Optimization results including optimized script
+        """
+        pass
+
 class KnowledgeAgentInterface(MultiAgentBase):
     """
     Interface for knowledge gathering and processing agents.
@@ -61,44 +113,6 @@ class KnowledgeAgentInterface(MultiAgentBase):
             Validation results with confidence scores
         """
         pass
-    
-    async def _handle_message(self, message: MultiAgentMessage) -> None:
-        """
-        Handle messages for the knowledge agent.
-        
-        Args:
-            message: Message to process
-        """
-        # Handle knowledge requests
-        if message.message_type == MessageType.KNOWLEDGE_REQUEST:
-            try:
-                # Extract query and context
-                content = message.content
-                query = content.get("query", "")
-                context = content.get("context", {})
-                
-                # Retrieve knowledge
-                knowledge = await self.retrieve_knowledge(query, context)
-                
-                # Create response
-                response = message.create_response(
-                    content={"knowledge": knowledge, "query": query},
-                    metadata={"confidence": knowledge.get("confidence", 0.0)}
-                )
-                
-                # Send response
-                recipient = message.sender
-                await self.coordinator.route_message(response, recipient)
-                
-            except Exception as e:
-                logger.error(f"Error handling knowledge request: {e}", exc_info=True)
-                
-                # Send error response
-                error_response = message.create_response(
-                    content={"error": str(e), "query": message.content.get("query", "")},
-                    metadata={"success": False}
-                )
-                await self.coordinator.route_message(error_response, message.sender)
 
 class ExecutionAgentInterface(MultiAgentBase):
     """
@@ -152,66 +166,6 @@ class ExecutionAgentInterface(MultiAgentBase):
             Error handling results including recovery action
         """
         pass
-    
-    async def _handle_message(self, message: MultiAgentMessage) -> None:
-        """
-        Handle messages for the execution agent.
-        
-        Args:
-            message: Message to process
-        """
-        # Handle execution requests
-        if message.message_type == MessageType.EXECUTION_REQUEST:
-            try:
-                # Extract task and context
-                content = message.content
-                task = content.get("task", {})
-                context = content.get("context", {})
-                
-                # Execute task
-                result = await self.execute_task(task, context)
-                
-                # Create response
-                response = message.create_response(
-                    content={"result": result, "task": task},
-                    metadata={"success": True}
-                )
-                
-                # Send response
-                recipient = message.sender
-                await self.coordinator.route_message(response, recipient)
-                
-            except Exception as e:
-                logger.error(f"Error handling execution request: {e}", exc_info=True)
-                
-                # Try to handle the error
-                content = message.content
-                task = content.get("task", {})
-                context = content.get("context", {})
-                
-                try:
-                    # Attempt error recovery
-                    recovery_result = await self.handle_execution_error(e, task, context)
-                    
-                    # Send recovery response
-                    recovery_response = message.create_response(
-                        content={
-                            "error": str(e),
-                            "recovery": recovery_result,
-                            "task": task
-                        },
-                        metadata={"success": False, "recovered": True}
-                    )
-                    await self.coordinator.route_message(recovery_response, message.sender)
-                    
-                except Exception as e2:
-                    # Send error response if recovery fails
-                    logger.error(f"Error recovery failed: {e2}", exc_info=True)
-                    error_response = message.create_response(
-                        content={"error": str(e), "task": task},
-                        metadata={"success": False, "recovered": False}
-                    )
-                    await self.coordinator.route_message(error_response, message.sender)
 
 class VerificationAgentInterface(MultiAgentBase):
     """
@@ -263,60 +217,6 @@ class VerificationAgentInterface(MultiAgentBase):
             Security verification results
         """
         pass
-    
-    async def _handle_message(self, message: MultiAgentMessage) -> None:
-        """
-        Handle messages for the verification agent.
-        
-        Args:
-            message: Message to process
-        """
-        # Handle verification requests
-        if message.message_type == MessageType.VERIFICATION_REQUEST:
-            try:
-                # Extract content
-                content = message.content
-                verification_type = content.get("verification_type", "execution")
-                
-                # Different verification types
-                if verification_type == "execution":
-                    execution_result = content.get("execution_result", {})
-                    context = content.get("context", {})
-                    result = await self.verify_execution(execution_result, context)
-                elif verification_type == "state":
-                    state = content.get("state")
-                    if not isinstance(state, WorkflowState):
-                        raise ValueError("State verification requires a WorkflowState object")
-                    result = await self.verify_system_state(state)
-                elif verification_type == "security":
-                    artifact = content.get("artifact")
-                    artifact_type = content.get("artifact_type", "unknown")
-                    result = await self.verify_security(artifact, artifact_type)
-                else:
-                    raise ValueError(f"Unknown verification type: {verification_type}")
-                
-                # Create response
-                response = message.create_response(
-                    content={"result": result, "verification_type": verification_type},
-                    metadata={"success": True, "passed": result.get("passed", False)}
-                )
-                
-                # Send response
-                recipient = message.sender
-                await self.coordinator.route_message(response, recipient)
-                
-            except Exception as e:
-                logger.error(f"Error handling verification request: {e}", exc_info=True)
-                
-                # Send error response
-                error_response = message.create_response(
-                    content={
-                        "error": str(e), 
-                        "verification_type": message.content.get("verification_type", "unknown")
-                    },
-                    metadata={"success": False}
-                )
-                await self.coordinator.route_message(error_response, message.sender)
 
 class ImprovementAgentInterface(MultiAgentBase):
     """
@@ -366,46 +266,3 @@ class ImprovementAgentInterface(MultiAgentBase):
             True if learning was successful
         """
         pass
-    
-    async def _handle_message(self, message: MultiAgentMessage) -> None:
-        """
-        Handle messages for the improvement agent.
-        
-        Args:
-            message: Message to process
-        """
-        # Handle improvement suggestion requests
-        if message.message_type == MessageType.IMPROVEMENT_SUGGESTION:
-            try:
-                # Extract content
-                content = message.content
-                metrics = content.get("metrics", {})
-                
-                # Analyze performance
-                analysis = await self.analyze_performance(metrics)
-                
-                # Generate improvement suggestions
-                suggestions = await self.generate_improvements(analysis)
-                
-                # Create response
-                response = message.create_response(
-                    content={
-                        "analysis": analysis,
-                        "suggestions": suggestions
-                    },
-                    metadata={"success": True}
-                )
-                
-                # Send response
-                recipient = message.sender
-                await self.coordinator.route_message(response, recipient)
-                
-            except Exception as e:
-                logger.error(f"Error handling improvement suggestion request: {e}", exc_info=True)
-                
-                # Send error response
-                error_response = message.create_response(
-                    content={"error": str(e)},
-                    metadata={"success": False}
-                )
-                await self.coordinator.route_message(error_response, message.sender)

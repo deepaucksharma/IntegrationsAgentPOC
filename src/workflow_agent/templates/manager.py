@@ -1,491 +1,652 @@
 """
-Template management for script generation with consistent search and loading.
+Enhanced template manager with inheritance, caching, and conditional rendering support.
 """
-import logging
 import os
-import platform
-from pathlib import Path
-from typing import Dict, Any, Optional, List, Union, Tuple
 import json
-import datetime
-import jinja2
-from jinja2 import Environment, FileSystemLoader, Template, select_autoescape
+import yaml
+import logging
+import re
+import time
+import copy
+from pathlib import Path
+from typing import Dict, Any, List, Optional, Set, Tuple, Union
+from base64 import b64encode, b64decode
+from datetime import datetime
+import uuid
+import hashlib
 
-from ..config.configuration import WorkflowConfiguration
-from ..error.exceptions import TemplateError
-from ..error.handler import ErrorHandler, handle_safely
+from jinja2 import Environment, FileSystemLoader, select_autoescape, TemplateNotFound, meta
 
 logger = logging.getLogger(__name__)
 
-class TemplateManager:
+class TemplateCache:
     """
-    Manages template loading, resolution, and rendering with clear precedence rules.
-    Maintains a consistent template search path and resolution order.
+    Cache for rendered templates with time-based invalidation.
     """
     
-    def __init__(self, config: WorkflowConfiguration):
+    def __init__(self, max_size: int = 100, ttl: int = 3600):
         """
-        Initialize the template manager with configuration.
+        Initialize template cache.
         
         Args:
-            config: WorkflowConfiguration with template paths
+            max_size: Maximum number of templates in cache
+            ttl: Time to live in seconds for cache entries
         """
-        self.config = config
-        self.template_dirs = self._get_template_dirs()
-        self.template_env = self._initialize_environment()
-        self.templates_cache: Dict[str, str] = {}
+        self.cache: Dict[str, Dict[str, Any]] = {}
+        self.max_size = max_size
+        self.ttl = ttl
+        self.access_times: Dict[str, float] = {}
         
-        # Define clear precedence order for template resolution
-        self.precedence_order = [
-            "custom",     # Custom templates (highest precedence)
-            "project",    # Project-specific templates
-            "integration", # Integration-specific templates
-            "common",     # Common shared templates
-            "default"     # Default fallback templates (lowest precedence)
-        ]
-        
-        self._load_templates()
-        
-    def _get_template_dirs(self) -> Dict[str, Path]:
+    def get(self, key: str) -> Optional[str]:
         """
-        Get all template directories in order of precedence.
+        Get a cached template by key.
         
+        Args:
+            key: Cache key
+            
         Returns:
-            Dictionary of template category to directory path
+            Cached template content or None if not found/expired
         """
-        dirs = {}
+        if key not in self.cache:
+            return None
+            
+        # Check if expired
+        current_time = time.time()
+        if current_time - self.access_times[key] > self.ttl:
+            # Expired, remove from cache
+            del self.cache[key]
+            del self.access_times[key]
+            return None
+            
+        # Update access time
+        self.access_times[key] = current_time
+        return self.cache[key]
         
-        # Custom templates have highest precedence
-        if self.config.custom_template_dir and self.config.custom_template_dir.exists():
-            dirs["custom"] = self.config.custom_template_dir
-            
-        # Then project templates
-        project_template_dir = self.config.template_dir
-        if project_template_dir and project_template_dir.exists():
-            dirs["project"] = project_template_dir
-            
-        # Integration-specific templates
-        integration_template_dir = project_template_dir / "integrations" if project_template_dir else None
-        if integration_template_dir and integration_template_dir.exists():
-            dirs["integration"] = integration_template_dir
-            
-        # Common templates
-        common_templates = project_template_dir / "common" if project_template_dir else None
-        if common_templates and common_templates.exists():
-            dirs["common"] = common_templates
-            
-        # Default templates are last
-        default_templates = Path(__file__).parent / "default_templates"
-        if not default_templates.exists():
-            default_templates.mkdir(parents=True, exist_ok=True)
-            
-        dirs["default"] = default_templates
+    def set(self, key: str, value: str) -> None:
+        """
+        Add a template to the cache.
         
-        # Log the directories found
-        for category, path in dirs.items():
-            logger.debug(f"Template directory for '{category}': {path}")
+        Args:
+            key: Cache key
+            value: Template content
+        """
+        # Check if cache is full
+        if len(self.cache) >= self.max_size and key not in self.cache:
+            # Remove least recently used item
+            lru_key = min(self.access_times, key=self.access_times.get)
+            del self.cache[lru_key]
+            del self.access_times[lru_key]
             
-        return dirs
+        # Add to cache
+        current_time = time.time()
+        self.cache[key] = value
+        self.access_times[key] = current_time
+        
+    def invalidate(self, pattern: str = None) -> None:
+        """
+        Invalidate cache entries matching a pattern.
+        
+        Args:
+            pattern: Regex pattern to match against keys
+        """
+        if pattern:
+            # Compile regex
+            regex = re.compile(pattern)
+            
+            # Find keys to invalidate
+            keys_to_remove = [key for key in self.cache if regex.search(key)]
+            
+            # Remove matching keys
+            for key in keys_to_remove:
+                del self.cache[key]
+                del self.access_times[key]
+                
+            logger.debug(f"Invalidated {len(keys_to_remove)} cache entries matching pattern '{pattern}'")
+        else:
+            # Invalidate all
+            self.cache.clear()
+            self.access_times.clear()
+            logger.debug("Invalidated entire template cache")
 
-    def _initialize_environment(self) -> Environment:
+class TemplateManager:
+    """
+    Enhanced template manager with inheritance, caching, and conditional rendering.
+    """
+    
+    def __init__(self, template_dirs: Optional[List[str]] = None, cache_enabled: bool = True):
         """
-        Initialize the Jinja2 environment.
+        Initialize template manager.
+        
+        Args:
+            template_dirs: List of template directories to search
+            cache_enabled: Whether to enable template caching
+        """
+        self.template_dirs = template_dirs or ["templates"]
+        self.cache = TemplateCache() if cache_enabled else None
+        self.env = self._create_environment()
+        self.template_registry: Dict[str, Dict[str, Any]] = {}
+        self.inheritance_map: Dict[str, List[str]] = {}
+        
+        # Initialize template registry
+        self._init_template_registry()
+        
+    def _create_environment(self) -> Environment:
+        """
+        Create Jinja2 environment with custom filters and globals.
         
         Returns:
             Configured Jinja2 environment
         """
-        # Convert Path objects to strings for Jinja
-        template_paths = [str(d) for d in self.template_dirs.values() if d.exists()]
-        
-        if not template_paths:
-            logger.warning("No template directories found, creating default")
-            default_dir = Path(__file__).parent / "default_templates"
-            default_dir.mkdir(parents=True, exist_ok=True)
-            template_paths = [str(default_dir)]
-            
-        logger.info(f"Template search path: {template_paths}")
-        
+        loader = FileSystemLoader(self.template_dirs)
         env = Environment(
-            loader=FileSystemLoader(template_paths),
-            autoescape=select_autoescape(),
+            loader=loader,
+            extensions=['jinja2.ext.do', 'jinja2.ext.loopcontrols'],
             trim_blocks=True,
-            lstrip_blocks=True
+            lstrip_blocks=True,
+            autoescape=select_autoescape(['html', 'xml'])
         )
         
         # Add custom filters
-        env.filters["to_json"] = lambda v: json.dumps(v)
-        env.filters["to_yaml"] = self._to_yaml
-        env.filters["basename"] = lambda p: os.path.basename(p) if p else ""
-        env.filters["dirname"] = lambda p: os.path.dirname(p) if p else ""
+        env.filters.update({
+            'to_yaml': lambda obj: yaml.dump(obj, default_flow_style=False),
+            'to_json': lambda obj: json.dumps(obj, indent=2),
+            'path_join': lambda paths: os.path.join(*paths) if isinstance(paths, list) else paths,
+            'base64_encode': lambda s: b64encode(s.encode()).decode() if s else '',
+            'base64_decode': lambda s: b64decode(s.encode()).decode() if s else '',
+            'lower': lambda s: s.lower() if s else '',
+            'upper': lambda s: s.upper() if s else '',
+            'title': lambda s: s.title() if s else '',
+            'strip': lambda s: s.strip() if s else '',
+            'replace': lambda s, old, new: s.replace(old, new) if s else '',
+            'join': lambda seq, sep='': sep.join(seq) if seq else '',
+            'split': lambda s, sep=None: s.split(sep) if s else [],
+            'to_bool': lambda v: bool(v),
+            'format_date': lambda dt, fmt='%Y-%m-%d': dt.strftime(fmt) if dt else '',
+            'default': lambda v, d='': v if v else d,
+        })
+        
+        # Add global functions
+        env.globals.update({
+            'include_file': self._include_file,
+            'now': datetime.now,
+            'uuid': lambda: str(uuid.uuid4()),
+            'env': lambda key, default='': os.environ.get(key, default),
+            'is_windows': os.name == 'nt',
+            'is_linux': os.name == 'posix',
+            'platform': os.name,
+            'exists': os.path.exists,
+            'dirname': os.path.dirname,
+            'basename': os.path.basename,
+        })
         
         return env
-    
-    def _to_yaml(self, value: Any) -> str:
+        
+    def _include_file(self, filename: str) -> str:
         """
-        Convert value to YAML format.
+        Include a file's contents directly.
         
         Args:
-            value: Value to convert
+            filename: Path to file relative to template directories
             
         Returns:
-            YAML string representation
+            File contents or error message
         """
-        try:
-            import yaml
-            return yaml.dump(value, default_flow_style=False)
-        except ImportError:
-            logger.warning("PyYAML not available, using JSON format")
-            return json.dumps(value, indent=2)
-
-    def _load_templates(self) -> None:
-        """Load all templates into the cache with clear categorization."""
-        # Reset cache
-        self.templates_cache = {}
-        
-        # Track loaded templates with their source
-        template_sources = {}
-        
-        # Process directories in precedence order
-        for category in self.precedence_order:
-            if category not in self.template_dirs:
-                continue
-                
-            template_dir = self.template_dirs[category]
-            if not template_dir.exists():
-                continue
-                
-            logger.debug(f"Loading templates from {template_dir} (category: {category})")
-            
-            for file_path in template_dir.glob("**/*.j2"):
+        for template_dir in self.template_dirs:
+            file_path = os.path.join(template_dir, filename)
+            if os.path.exists(file_path):
                 try:
-                    rel_path = file_path.relative_to(template_dir)
-                    template_key = str(rel_path).replace("\\", "/").replace(".j2", "")
-                    
-                    # Read template content
-                    with open(file_path, "r", encoding="utf-8") as f:
-                        content = f.read()
-                    
-                    # Store template in cache, potentially overriding lower precedence templates
-                    self.templates_cache[template_key] = content
-                    
-                    # Track where this template came from
-                    template_sources[template_key] = category
-                    
-                    logger.debug(f"Loaded template: {template_key} from {category}")
+                    with open(file_path, 'r') as f:
+                        return f.read()
                 except Exception as e:
-                    logger.error(f"Error loading template {file_path}: {e}")
+                    logger.error(f"Error reading included file {file_path}: {e}")
+                    return f"# Error reading file: {str(e)}"
+        return f"# File not found: {filename}"
         
-        # Log summary of templates by category
-        template_counts = {}
-        for template_key, source in template_sources.items():
-            template_counts[source] = template_counts.get(source, 0) + 1
+    def _init_template_registry(self) -> None:
+        """Initialize the template registry by scanning template directories."""
+        for template_dir in self.template_dirs:
+            self._scan_templates(template_dir)
             
-        for category, count in template_counts.items():
-            logger.info(f"Loaded {count} templates from {category} directory")
-            
-        # Set up fallback templates if none found
-        if not self.templates_cache:
-            logger.warning("No templates found, creating default templates")
-            self._create_default_templates()
-            
-        logger.info(f"Template loading completed. Total templates: {len(self.templates_cache)}")
-
-    def _create_default_templates(self) -> None:
-        """Create default templates if none exist."""
-        default_dir = self.template_dirs.get("default")
-        if not default_dir:
-            default_dir = Path(__file__).parent / "default_templates"
-            default_dir.mkdir(parents=True, exist_ok=True)
-            self.template_dirs["default"] = default_dir
+        # Build inheritance map
+        self._build_inheritance_map()
         
-        default_templates = {
-            "install/default.sh.j2": """#!/usr/bin/env bash
-set -e
-echo "Installing {{ target_name }}"
-echo "CHANGE:PACKAGE_INSTALLED:{{ target_name }}"
-# Default installation script
-# Replace with actual commands for your integration
-""",
-            "uninstall/default.sh.j2": """#!/usr/bin/env bash
-set -e
-echo "Uninstalling {{ target_name }}"
-echo "CHANGE:PACKAGE_REMOVED:{{ target_name }}"
-# Default uninstallation script
-# Replace with actual commands for your integration
-""",
-            "verify/default.sh.j2": """#!/usr/bin/env bash
-set -e
-echo "Verifying {{ target_name }}"
-# Default verification script
-# Replace with actual commands for your integration
-"""
-        }
+        logger.info(f"Initialized template registry with {len(self.template_registry)} templates")
         
-        for template_path, content in default_templates.items():
-            full_path = default_dir / template_path
-            full_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(full_path, "w", encoding="utf-8") as f:
-                f.write(content)
-            self.templates_cache[template_path.replace(".j2", "")] = content
-            
-        logger.info(f"Created default templates in {default_dir}")
-
-    def get_template(self, template_key: str) -> Optional[str]:
+    def _scan_templates(self, template_dir: str) -> None:
         """
-        Get a template by key with improved resolution logic.
+        Scan a template directory for templates and build registry.
         
         Args:
-            template_key: Template identifier (e.g. "install/integration_name")
-            
-        Returns:
-            Template content or None if not found
+            template_dir: Directory to scan
         """
-        # Step 1: Check for exact match
-        if template_key in self.templates_cache:
-            logger.debug(f"Found exact template match for: {template_key}")
-            return self.templates_cache[template_key]
+        if not os.path.exists(template_dir):
+            logger.warning(f"Template directory not found: {template_dir}")
+            return
             
-        # Check if this template key already has an extension
-        base_template_key = template_key
-        template_ext = None
-        
-        for ext in [".ps1", ".sh", ".py", ".j2"]:
-            if template_key.endswith(ext):
-                base_template_key = template_key[:-len(ext)]
-                template_ext = ext
-                break
-        
-        # Step 2: Try with different extensions if no extension is present
-        if template_ext is None:
-            for ext in [".ps1", ".sh", ".py"]:
-                if template_key + ext in self.templates_cache:
-                    template_with_ext = template_key + ext
-                    logger.debug(f"Found template with extension: {template_with_ext}")
-                    return self.templates_cache[template_with_ext]
-                
-        # Step 3: Try with .j2 extension
-        if template_ext:
-            # Try with .j2 extension
-            if base_template_key + template_ext + ".j2" in self.templates_cache:
-                logger.debug(f"Found template with .j2 extension: {base_template_key + template_ext + '.j2'}")
-                return self.templates_cache[base_template_key + template_ext + ".j2"]
-            
-        # Step 4: Try to find a default template for this action
-        if "/" in template_key:
-            # Extract action from template key
-            parts = template_key.split("/")
-            action = parts[0]
-            
-            # Try with PowerShell first on Windows
-            if "win" in platform.system().lower():
-                default_ps_key = f"{action}/default.ps1"
-                if default_ps_key in self.templates_cache:
-                    logger.info(f"Using default template for {template_key}: {default_ps_key}")
-                    return self.templates_cache[default_ps_key]
+        for root, _, files in os.walk(template_dir):
+            for file in files:
+                if file.endswith(('.j2', '.jinja', '.jinja2', '.tpl')):
+                    rel_path = os.path.relpath(os.path.join(root, file), template_dir)
                     
-                # Try with .j2 extension
-                if default_ps_key + ".j2" in self.templates_cache:
-                    logger.info(f"Using default template for {template_key}: {default_ps_key}.j2")
-                    return self.templates_cache[default_ps_key + ".j2"]
-            
-            # Try Bash script
-            default_key = f"{action}/default.sh"
-            if default_key in self.templates_cache:
-                logger.info(f"Using default template for {template_key}: {default_key}")
-                return self.templates_cache[default_key]
-                
-            # Try with .j2 extension
-            if default_key + ".j2" in self.templates_cache:
-                logger.info(f"Using default template for {template_key}: {default_key}.j2")
-                return self.templates_cache[default_key + ".j2"]
-        
-        # Log clear message about template resolution failure
-        logger.warning(f"Template not found: {template_key} (tried extensions and defaults)")
-        return None
-
-    @handle_safely
-    def render_template(
-        self, 
-        template_key: str, 
-        context: Dict[str, Any]
-    ) -> Optional[str]:
+                    try:
+                        # Load template
+                        template_source = self.env.loader.get_source(self.env, rel_path)[0]
+                        
+                        # Extract template metadata
+                        metadata = self._extract_template_metadata(template_source, rel_path)
+                        
+                        # Add to registry
+                        self.template_registry[rel_path] = {
+                            'path': rel_path,
+                            'full_path': os.path.join(root, file),
+                            'extends': metadata.get('extends'),
+                            'blocks': metadata.get('blocks', []),
+                            'requires': metadata.get('requires', []),
+                            'tags': metadata.get('tags', []),
+                            'platform': metadata.get('platform'),
+                            'description': metadata.get('description', ''),
+                            'version': metadata.get('version', '1.0'),
+                            'last_modified': os.path.getmtime(os.path.join(root, file))
+                        }
+                        
+                    except Exception as e:
+                        logger.warning(f"Error loading template {rel_path}: {e}")
+                        
+    def _extract_template_metadata(self, source: str, rel_path: str) -> Dict[str, Any]:
         """
-        Render a template with context.
+        Extract metadata from template source.
         
         Args:
-            template_key: Template identifier
-            context: Template context data
+            source: Template source code
+            rel_path: Relative path to template
             
         Returns:
-            Rendered template or None if error
+            Template metadata
         """
-        template_str = self.get_template(template_key)
-        if not template_str:
-            error_msg = f"Template not found: {template_key}"
-            logger.error(error_msg)
-            raise TemplateError(error_msg)
-            
-        try:
-            # Add standard context variables for all templates
-            full_context = {
-                "env": os.environ,
-                "now": datetime.datetime.now(),
-                **context
-            }
-            
-            template = self.template_env.from_string(template_str)
-            return template.render(**full_context)
-        except jinja2.exceptions.TemplateError as e:
-            error_msg = f"Template rendering error for {template_key}: {e}"
-            logger.error(error_msg)
-            raise TemplateError(error_msg) from e
-        except Exception as e:
-            error_msg = f"Unexpected error rendering {template_key}: {e}"
-            logger.error(error_msg)
-            raise TemplateError(error_msg) from e
-
-    @handle_safely
-    def render_string_template(
-        self, 
-        template_content: str, 
-        context: Dict[str, Any]
-    ) -> Optional[str]:
-        """
-        Render a template string with context.
-        
-        Args:
-            template_content: Raw template content
-            context: Template context data
-            
-        Returns:
-            Rendered template or None if error
-        """
-        try:
-            # Add standard context variables for all templates
-            full_context = {
-                "env": os.environ,
-                "now": datetime.datetime.now(),
-                **context
-            }
-            
-            template = self.template_env.from_string(template_content)
-            return template.render(**full_context)
-        except Exception as e:
-            error_msg = f"Template rendering error: {e}"
-            logger.error(error_msg)
-            raise TemplateError(error_msg) from e
-
-    def reload_templates(self) -> None:
-        """Reload all templates from disk."""
-        self._load_templates()
-        logger.info("Templates reloaded")
-
-    def resolve_template_path(self, integration_type: str, action: str, target_name: Optional[str] = None) -> str:
-        """
-        Resolve a template path with clear precedence rules.
-        
-        Args:
-            integration_type: Type of integration (e.g., "custom", "infra_agent")
-            action: Action to perform (e.g., "install", "verify", "uninstall")
-            target_name: Optional target name for more specific templates
-            
-        Returns:
-            Template key to use
-        """
-        # Define resolution order from most specific to least specific:
-        # 1. action/integration_type/target_name
-        # 2. action/integration_type/default
-        # 3. action/integration_type
-        # 4. action/default
-        
-        template_paths = []
-        
-        if target_name:
-            # Most specific: action/integration_type/target_name
-            template_paths.append(f"{action}/{integration_type}/{target_name}")
-            
-        # Integration specific: action/integration_type
-        template_paths.append(f"{action}/{integration_type}")
-        
-        # Integration type's default: action/integration_type/default
-        template_paths.append(f"{action}/{integration_type}/default")
-        
-        # Generic action default: action/default
-        template_paths.append(f"{action}/default")
-        
-        # Try each path in order
-        for path in template_paths:
-            if self.get_template(path):
-                logger.debug(f"Resolved template: {path}")
-                return path
-                
-        # If no template found, return the default path (it will return None when used)
-        return f"{action}/default"
-
-    def list_available_templates(self) -> Dict[str, List[str]]:
-        """
-        List all available templates by category.
-        
-        Returns:
-            Dictionary of template categories and their templates
-        """
-        categories: Dict[str, List[str]] = {}
-        
-        for template_key in sorted(self.templates_cache.keys()):
-            # Extract category from template key
-            parts = template_key.split("/")
-            if len(parts) > 1:
-                category = parts[0]
-                if category not in categories:
-                    categories[category] = []
-                categories[category].append(template_key)
-            else:
-                if "other" not in categories:
-                    categories["other"] = []
-                categories["other"].append(template_key)
-                
-        return categories
-    
-    def get_template_documentation(self, template_key: str) -> Dict[str, Any]:
-        """
-        Extract documentation from a template.
-        
-        Args:
-            template_key: Template identifier
-            
-        Returns:
-            Dictionary with template documentation
-        """
-        template_str = self.get_template(template_key)
-        if not template_str:
-            return {"error": f"Template not found: {template_key}"}
-            
-        # Extract header comments
-        lines = template_str.split("\n")
-        header_comments = []
-        for line in lines:
-            line = line.strip()
-            # Skip empty lines at the beginning
-            if not line and not header_comments:
-                continue
-            # Extract comment
-            if line.startswith("#") or line.startswith("//") or line.startswith("<!--"):
-                header_comments.append(line)
-            else:
-                # Stop at first non-comment line
-                break
-                
-        # Extract parameters from Jinja2 template
-        import re
-        params = []
-        param_pattern = r"{{\s*([a-zA-Z0-9_]+)\s*}}"
-        for match in re.finditer(param_pattern, template_str):
-            param = match.group(1)
-            if param not in params and param not in ["env", "now"]:
-                params.append(param)
-                
-        return {
-            "template_key": template_key,
-            "description": "\n".join(header_comments),
-            "parameters": params
+        metadata = {
+            'blocks': [],
+            'requires': [],
+            'tags': [],
         }
+        
+        # Check for extends
+        extends_match = re.search(r'{%\s*extends\s+[\'"]([^\'"]+)[\'"]', source)
+        if extends_match:
+            metadata['extends'] = extends_match.group(1)
+            
+        # Extract blocks
+        for block_match in re.finditer(r'{%\s*block\s+([^\s%]+)[^%]*%}', source):
+            metadata['blocks'].append(block_match.group(1))
+            
+        # Look for metadata block
+        meta_match = re.search(r'{#\s*META\s*(.*?)\s*#}', source, re.DOTALL)
+        if meta_match:
+            try:
+                meta_content = meta_match.group(1).strip()
+                # Try to parse as YAML
+                meta_data = yaml.safe_load(meta_content)
+                if isinstance(meta_data, dict):
+                    metadata.update(meta_data)
+            except Exception as e:
+                logger.warning(f"Error parsing metadata for {rel_path}: {e}")
+                
+        # Extract required parameters
+        ast = self.env.parse(source)
+        required_params = meta.find_undeclared_variables(ast)
+        metadata['requires'] = list(required_params)
+        
+        # Extract platform from path
+        if 'windows' in rel_path.lower() or 'win' in rel_path.lower():
+            metadata['platform'] = 'windows'
+        elif 'linux' in rel_path.lower() or 'unix' in rel_path.lower():
+            metadata['platform'] = 'linux'
+        
+        return metadata
+        
+    def _build_inheritance_map(self) -> None:
+        """Build template inheritance map for efficient lookups."""
+        # Clear existing map
+        self.inheritance_map = {}
+        
+        # First pass: build direct inheritance
+        for template_name, template_info in self.template_registry.items():
+            if template_info.get('extends'):
+                parent = template_info['extends']
+                if parent not in self.inheritance_map:
+                    self.inheritance_map[parent] = []
+                self.inheritance_map[parent].append(template_name)
+                
+        # Second pass: resolve transitive inheritance
+        for parent in list(self.inheritance_map.keys()):
+            self._resolve_inheritance(parent, set())
+            
+    def _resolve_inheritance(self, template_name: str, visited: Set[str]) -> List[str]:
+        """
+        Resolve template inheritance recursively.
+        
+        Args:
+            template_name: Template to resolve
+            visited: Set of already visited templates to avoid cycles
+            
+        Returns:
+            List of all descendants
+        """
+        if template_name in visited:
+            logger.warning(f"Inheritance cycle detected involving template {template_name}")
+            return []
+            
+        visited.add(template_name)
+        
+        # Get direct children
+        children = self.inheritance_map.get(template_name, [])
+        
+        # Get descendants of children
+        all_descendants = children.copy()
+        for child in children:
+            descendants = self._resolve_inheritance(child, visited.copy())
+            all_descendants.extend(descendants)
+            
+        # Update inheritance map with all descendants
+        self.inheritance_map[template_name] = list(set(all_descendants))
+        
+        return all_descendants
+        
+    async def render_template(self, template_path: str, context: Dict[str, Any], use_cache: bool = True) -> str:
+        """
+        Render a template with the given context.
+        
+        Args:
+            template_path: Path to template
+            context: Template rendering context
+            use_cache: Whether to use template cache
+            
+        Returns:
+            Rendered template
+        """
+        # Check if template exists
+        if not self._template_exists(template_path):
+            raise TemplateNotFound(f"Template not found: {template_path}")
+            
+        # Create cache key
+        cache_key = None
+        if use_cache and self.cache:
+            context_hash = hashlib.md5(json.dumps(context, sort_keys=True).encode()).hexdigest()
+            cache_key = f"{template_path}:{context_hash}"
+            
+            # Check cache
+            cached = self.cache.get(cache_key)
+            if cached:
+                logger.debug(f"Using cached template: {template_path}")
+                return cached
+                
+        try:
+            # Load and render template
+            template = self.env.get_template(template_path)
+            
+            # Validate context against required parameters
+            self._validate_context(template_path, context)
+            
+            # Render template
+            rendered = template.render(**context)
+            
+            # Cache rendered template
+            if cache_key and self.cache:
+                self.cache.set(cache_key, rendered)
+                
+            return rendered
+            
+        except Exception as e:
+            logger.error(f"Error rendering template {template_path}: {e}")
+            raise
+            
+    def _template_exists(self, template_path: str) -> bool:
+        """Check if a template exists."""
+        try:
+            self.env.get_template(template_path)
+            return True
+        except TemplateNotFound:
+            return False
+            
+    def _validate_context(self, template_path: str, context: Dict[str, Any]) -> None:
+        """
+        Validate context against template requirements.
+        
+        Args:
+            template_path: Path to template
+            context: Template rendering context
+            
+        Raises:
+            ValueError if required parameters are missing
+        """
+        # Get template info
+        template_info = self.template_registry.get(template_path)
+        if not template_info:
+            return
+            
+        # Check required parameters
+        missing = []
+        for param in template_info.get('requires', []):
+            # Skip special variables
+            if param.startswith(('_', 'range', 'dict', 'lipsum', 'cycler')):
+                continue
+                
+            # Check if parameter is in context
+            parts = param.split('.')
+            value = context
+            found = True
+            
+            for part in parts:
+                if isinstance(value, dict) and part in value:
+                    value = value[part]
+                else:
+                    found = False
+                    break
+                    
+            if not found:
+                missing.append(param)
+                
+        if missing:
+            logger.warning(f"Missing required parameters for template {template_path}: {missing}")
+            # Don't raise error, as templates might have defaults or conditionals
+            
+    async def select_best_template(self, candidates: List[Dict[str, Any]], context: Dict[str, Any]) -> Optional[str]:
+        """
+        Select the best template from a list of candidates based on context.
+        
+        Args:
+            candidates: List of template candidates with conditions
+            context: Template rendering context
+            
+        Returns:
+            Path to best matching template or None if no match
+        """
+        if not candidates:
+            return None
+            
+        best_match = None
+        best_score = -1
+        
+        for candidate in candidates:
+            path = candidate.get("path")
+            conditions = candidate.get("conditions", {})
+            
+            # Calculate match score
+            score = self._evaluate_conditions(conditions, context)
+            
+            # Check if template exists
+            if not self._template_exists(path):
+                logger.warning(f"Template not found: {path}")
+                continue
+                
+            # Update best match if better score
+            if score > best_score:
+                best_score = score
+                best_match = path
+                
+        return best_match
+        
+    def _evaluate_conditions(self, conditions: Dict[str, Any], context: Dict[str, Any]) -> int:
+        """
+        Evaluate conditions against context to get a match score.
+        
+        Args:
+            conditions: Condition dictionary
+            context: Context to evaluate against
+            
+        Returns:
+            Match score (higher is better)
+        """
+        if not conditions:
+            return 0  # Baseline score for no conditions
+            
+        score = 0
+        for key, condition in conditions.items():
+            # Get context value
+            key_parts = key.split('.')
+            value = context
+            for part in key_parts:
+                if isinstance(value, dict) and part in value:
+                    value = value[part]
+                else:
+                    value = None
+                    break
+                    
+            # Skip if value not found
+            if value is None:
+                continue
+                
+            # Check condition
+            if isinstance(condition, dict):
+                # Complex condition
+                if "eq" in condition and value == condition["eq"]:
+                    score += 10
+                elif "not_eq" in condition and value != condition["not_eq"]:
+                    score += 10
+                elif "contains" in condition and condition["contains"] in value:
+                    score += 5
+                elif "not_contains" in condition and condition["not_contains"] not in value:
+                    score += 5
+                elif "regex" in condition and re.search(condition["regex"], str(value)):
+                    score += 8
+                elif "gt" in condition and value > condition["gt"]:
+                    score += 7
+                elif "lt" in condition and value < condition["lt"]:
+                    score += 7
+                elif "gte" in condition and value >= condition["gte"]:
+                    score += 7
+                elif "lte" in condition and value <= condition["lte"]:
+                    score += 7
+                elif "in" in condition and value in condition["in"]:
+                    score += 9
+                elif "not_in" in condition and value not in condition["not_in"]:
+                    score += 9
+            else:
+                # Simple equality condition
+                if value == condition:
+                    score += 10
+                    
+        return score
+        
+    async def find_templates_for_integration(self, integration_type: str, action: str, system_context: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """
+        Find templates suitable for a specific integration and action.
+        
+        Args:
+            integration_type: Type of integration
+            action: Action to perform
+            system_context: System context
+            
+        Returns:
+            List of matching templates with metadata
+        """
+        # Determine platform
+        is_windows = system_context.get("is_windows", os.name == 'nt')
+        platform = "windows" if is_windows else "linux"
+        
+        # Possible template locations in order of preference
+        patterns = [
+            # 1. Integration-specific template for action and platform
+            f"{integration_type}/{action}_{platform}",
+            
+            # 2. Integration-specific template for action
+            f"{integration_type}/{action}",
+            
+            # 3. Common template for action and platform
+            f"common/{action}_{platform}",
+            
+            # 4. Common template for action
+            f"common/{action}",
+            
+            # 5. Generic template
+            f"generic/{action}"
+        ]
+        
+        # Find matching templates
+        matches = []
+        
+        for pattern in patterns:
+            for template_path, template_info in self.template_registry.items():
+                if template_path.startswith(pattern):
+                    # Check platform compatibility
+                    template_platform = template_info.get('platform')
+                    if template_platform and template_platform != platform:
+                        continue
+                        
+                    # Check file extension
+                    if not template_path.endswith(('.j2', '.jinja', '.jinja2', '.tpl')):
+                        continue
+                        
+                    # Add to matches
+                    matches.append({
+                        "path": template_path,
+                        "metadata": template_info,
+                        "pattern_match": pattern,
+                        "score": len(pattern)  # Longer pattern = more specific = higher score
+                    })
+                    
+        # Sort by score (descending)
+        matches.sort(key=lambda m: m["score"], reverse=True)
+        
+        return matches
+
+    def get_template_required_params(self, template_path: str) -> List[str]:
+        """
+        Get list of required parameters for a template.
+        
+        Args:
+            template_path: Path to template
+            
+        Returns:
+            List of required parameter names
+        """
+        # Get template info
+        template_info = self.template_registry.get(template_path)
+        if template_info:
+            return template_info.get('requires', [])
+            
+        # Template not in registry, parse it directly
+        try:
+            template_source = self.env.loader.get_source(self.env, template_path)[0]
+            ast = self.env.parse(template_source)
+            return list(meta.find_undeclared_variables(ast))
+        except Exception as e:
+            logger.warning(f"Error getting required parameters for {template_path}: {e}")
+            return []
+            
+    def reload_templates(self) -> None:
+        """Reload templates from disk and rebuild registry."""
+        # Clear caches
+        if self.cache:
+            self.cache.invalidate()
+            
+        # Reload environment
+        self.env = self._create_environment()
+        
+        # Clear registry
+        self.template_registry.clear()
+        self.inheritance_map.clear()
+        
+        # Rebuild registry
+        self._init_template_registry()
+        
+        logger.info("Template registry reloaded")

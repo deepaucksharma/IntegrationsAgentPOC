@@ -10,8 +10,7 @@ from datetime import datetime
 import uuid
 
 from ..core.state import WorkflowState
-from ..agent.consolidated_base_agent import BaseAgent, AgentResult, AgentContext
-from ..error.exceptions import AgentError, MultiAgentError
+from ..error.exceptions import MultiAgentError
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +26,11 @@ class MessageType:
     ERROR_REPORT = "error_report"
     IMPROVEMENT_SUGGESTION = "improvement_suggestion"
     COORDINATION_COMMAND = "coordination_command"
+    SCRIPT_GENERATION_REQUEST = "script_generation_request"
+    SCRIPT_GENERATION_RESPONSE = "script_generation_response"
+    SCRIPT_VALIDATION_REQUEST = "script_validation_request"
+    SCRIPT_VALIDATION_RESPONSE = "script_validation_response"
+    WORKFLOW_STATUS_UPDATE = "workflow_status_update"
 
 class MessagePriority:
     """Priority levels for messages."""
@@ -142,6 +146,8 @@ class MultiAgentMessage:
             MessageType.KNOWLEDGE_REQUEST: MessageType.KNOWLEDGE_RESPONSE,
             MessageType.EXECUTION_REQUEST: MessageType.EXECUTION_RESPONSE,
             MessageType.VERIFICATION_REQUEST: MessageType.VERIFICATION_RESPONSE,
+            MessageType.SCRIPT_GENERATION_REQUEST: MessageType.SCRIPT_GENERATION_RESPONSE,
+            MessageType.SCRIPT_VALIDATION_REQUEST: MessageType.SCRIPT_VALIDATION_RESPONSE,
         }
         
         response_type = response_types.get(self.message_type, MessageType.STATUS_UPDATE)
@@ -155,18 +161,15 @@ class MultiAgentMessage:
             priority=self.priority  # Match the priority of the request
         )
 
-class MultiAgentBase(BaseAgent):
+class MultiAgentBase(ABC):
     """
     Base class for all multi-agent system agents.
-    Extends the consolidated BaseAgent with multi-agent specific functionality.
     """
     
     def __init__(
         self, 
         coordinator: Any, 
-        agent_id: str, 
-        *args, 
-        **kwargs
+        agent_id: str,
     ):
         """
         Initialize a multi-agent system agent.
@@ -174,9 +177,7 @@ class MultiAgentBase(BaseAgent):
         Args:
             coordinator: Agent coordinator instance
             agent_id: Unique identifier for this agent
-            *args, **kwargs: Additional arguments for BaseAgent
         """
-        super().__init__(*args, **kwargs)
         self.coordinator = coordinator
         self.agent_id = agent_id
         self._message_queue = asyncio.Queue()
@@ -196,8 +197,6 @@ class MultiAgentBase(BaseAgent):
         
     async def initialize(self) -> None:
         """Initialize the agent and start message processing."""
-        await super().initialize()
-        
         # Start message processing task
         self._is_processing = True
         self._processing_task = asyncio.create_task(self._process_messages())
@@ -225,9 +224,6 @@ class MultiAgentBase(BaseAgent):
         
         # Clear internal state
         self._pending_responses.clear()
-        
-        # Call parent cleanup
-        await super().cleanup()
         logger.info(f"Agent {self.agent_id} cleaned up")
     
     async def send_message(

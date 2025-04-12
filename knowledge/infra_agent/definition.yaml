@@ -1,0 +1,20 @@
+description: Agent for monitoring system metrics
+name: infra_agent Agent
+parameters:
+- description: License key
+  name: license_key
+  required: true
+  type: string
+- default: localhost
+  description: Host to monitor
+  name: host
+  required: true
+  type: string
+- default: 8080
+  description: Port to use
+  name: port
+  required: false
+  type: integer
+source: enhanced_workflow_test
+updated_at: 1744467432.301197
+version: 1.0.0

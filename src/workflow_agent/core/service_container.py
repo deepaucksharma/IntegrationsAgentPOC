@@ -1,5 +1,7 @@
 """
 Enhanced service container with lifecycle management and auto-wiring capabilities.
+This implementation extends and enhances the base DependencyContainer with
+richer service lifecycle management and dependency tracking.
 """
 import logging
 import inspect
@@ -10,7 +12,7 @@ from dataclasses import dataclass
 import time
 
 from ..error.exceptions import InitializationError, ValidationError
-from ..error.handler import ErrorHandler, handle_safely
+from ..error.handler import handle_safely
 from .container import Provider, SingletonProvider, FactoryProvider, InstanceProvider, DependencyContainer
 
 logger = logging.getLogger(__name__)

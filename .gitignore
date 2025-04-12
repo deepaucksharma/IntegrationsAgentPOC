@@ -40,15 +40,33 @@ venv.bak/
 *.log
 *.log.*
 workflow_history.db
+workflow_history*.db
+workflow_*.db
 generated_scripts/
 custom_config*.yaml
 storage/
 cache/
 
-# Backup files
-*.bak
-*~
+# Archives and backup
+archives/*.zip
+archives/*.tar.gz
+backup/
+cleanup/
 
-# Exclude sensitive files that might contain API keys
+# Temporary files
+*.tmp
+*.temp
+.DS_Store
+Thumbs.db
+
+# Generated content
+generated_scripts/
+*.generated.*
+
+# Sensitive files that might contain API keys
 dev_keys.yaml
 local_settings.yaml
+api_keys.yaml
+credentials.yaml
+*_key.yaml
+*_keys.yaml

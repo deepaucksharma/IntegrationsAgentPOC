@@ -100,6 +100,10 @@ class AgentError(WorkflowError):
     """Error in agent execution."""
     pass
 
+class MultiAgentError(WorkflowError):
+    """Error in multi-agent system."""
+    pass
+
 class LLMError(WorkflowError):
     """Error in LLM interaction."""
     pass

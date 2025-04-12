@@ -121,6 +121,10 @@ class VerificationManager:
         self.runner = VerificationRunner(config)
         self.llm_service = llm_service or LLMService()
         
+        # Create an instance of the analysis manager
+        from .analysis_manager import VerificationAnalysisManager
+        self.analysis_manager = VerificationAnalysisManager(self.llm_service)
+        
         # Performance metrics and learning
         self.verification_metrics = {}
         self.verification_history = {}
@@ -1074,12 +1078,6 @@ class VerificationManager:
         Returns:
             Analysis of diagnostic results
         """
-        # Import the consolidated analysis manager
-        from .analysis_manager import VerificationAnalysisManager
-        
-        # Create the analysis manager if not already set up
-        analysis_manager = VerificationAnalysisManager(self.llm_service)
-        
         # Extract the steps from diagnostic results
         passed_steps = [step for step in diagnostic_results if step.get("success", False)]
         failed_steps = [step for step in diagnostic_results if not step.get("success", False)]
@@ -1093,8 +1091,8 @@ class VerificationManager:
             "workflow_id": getattr(state, "workflow_id", None)
         }
         
-        # Use the consolidated analysis method with diagnostic type
-        return await analysis_manager.analyze_verification_results(
+        # Use the class instance of analysis manager with diagnostic type
+        return await self.analysis_manager.analyze_verification_results(
             passed_steps=passed_steps,
             failed_steps=failed_steps,
             total_steps=total_steps,
@@ -1123,12 +1121,6 @@ class VerificationManager:
         Returns:
             Analysis of verification results
         """
-        # Import the consolidated analysis manager
-        from .analysis_manager import VerificationAnalysisManager
-        
-        # Create the analysis manager if not already set up
-        analysis_manager = VerificationAnalysisManager(self.llm_service)
-        
         # Prepare context information
         context = {
             "integration_type": state.integration_type,
@@ -1137,8 +1129,8 @@ class VerificationManager:
             "workflow_id": getattr(state, "workflow_id", None)
         }
         
-        # Use the consolidated analysis method
-        return await analysis_manager.analyze_verification_results(
+        # Use the class instance of analysis manager
+        return await self.analysis_manager.analyze_verification_results(
             passed_steps=passed_steps,
             failed_steps=failed_steps,
             total_steps=total_steps,

@@ -1,13 +1,13 @@
 """
-Base agent class for all agents in the system.
-This file now imports and re-exports the consolidated base agent implementation.
+DEPRECATED: This file has been removed.
+
+This agent implementation has been moved to workflow_agent.agent.base_agent 
+to eliminate redundant implementations.
+
+All imports should be updated to use:
+from workflow_agent.agent.base_agent import BaseAgent, AgentCapability, AgentConfig, AgentContext, AgentResult
 """
 
-# Import the consolidated base agent
-from ...agent.consolidated_base_agent import BaseAgent
-
-# Re-export MessageBus for backward compatibility
-from ..message_bus import MessageBus
-
-# This allows existing code to continue importing from this location
-# while actually using the consolidated implementation
+raise ImportError(
+    "This file has been deprecated. Please import BaseAgent from workflow_agent.agent.base_agent instead."
+)

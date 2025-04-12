@@ -313,8 +313,29 @@ class ErrorHandler:
         
         return decorator
 
+# Create decorator for handle_safely
+def handle_safely(func: Callable[..., T]) -> Callable[..., Union[T, None]]:
+    """
+    Decorator for synchronous error handling.
+    
+    Args:
+        func: Function to decorate
+        
+    Returns:
+        Wrapped function with error handling
+    """
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs) -> Union[T, None]:
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            logger.error(f"Error in {func.__name__}: {e}")
+            logger.debug(f"Error details: {traceback.format_exc()}")
+            return None
+    return wrapper
+
 # Alias for backward compatibility and convenience
-handle_safely = ErrorHandler.handle_safely
+handle_safely_sync = ErrorHandler.handle_safely  # Direct method call
 handle_safely_async = ErrorHandler.handle_safely_async
 retry = ErrorHandler.with_retry
 async_retry = ErrorHandler.with_async_retry

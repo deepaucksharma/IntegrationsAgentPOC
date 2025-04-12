@@ -1,23 +1,25 @@
 """
 ImprovementAgent: Responsible for analyzing failures and improving templates.
+Implements the ImprovementAgentInterface from the multi-agent system.
 """
 import logging
 import re
 import json
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from pathlib import Path
 import os
 import asyncio
 import tempfile
 
-from ..core.agents.base_agent import BaseAgent
+from .interfaces import ImprovementAgentInterface
 from ..core.message_bus import MessageBus
 from ..core.state import WorkflowState
 from ..storage.knowledge_base import KnowledgeBase
+from ..error.handler import handle_safely_async
 
 logger = logging.getLogger(__name__)
 
-class ImprovementAgent(BaseAgent):
+class ImprovementAgent(ImprovementAgentInterface):
     """
     Agent responsible for analyzing failures and generating improvements.
     """
@@ -371,6 +373,337 @@ retry_command() {
         if improvement["type"] == "script_improvement" and "improved_script" in improvement:
             logger.info(f"Would update template for {state.integration_type}/{state.target_name} with {improvement['description']}")
             
+    # Implement ImprovementAgentInterface required methods
+    @handle_safely_async
+    async def analyze_performance(self, metrics: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Analyze system performance and identify areas for improvement.
+        
+        Args:
+            metrics: Performance metrics to analyze
+            
+        Returns:
+            Analysis results
+        """
+        logger.info(f"Analyzing performance metrics")
+        
+        # Extract key metrics
+        integration_type = metrics.get("integration_type", "unknown")
+        target_name = metrics.get("target_name", "unknown")
+        action = metrics.get("action", "unknown")
+        execution_time = metrics.get("execution_time", 0)
+        error_count = metrics.get("error_count", 0)
+        warning_count = metrics.get("warning_count", 0)
+        success_rate = metrics.get("success_rate", 0)
+        
+        # Create integration key for learning data
+        integration_key = f"{integration_type}_{target_name}_{action}"
+        
+        # Get historical data if available
+        historical_data = {}
+        if integration_key in self.learning_data:
+            historical_data = self.learning_data[integration_key]
+            
+        # Analyze performance against historical data
+        analysis = {
+            "integration_type": integration_type,
+            "target_name": target_name,
+            "action": action,
+            "execution_time": execution_time,
+            "historical_comparisons": {}
+        }
+        
+        # Add performance insights
+        if historical_data:
+            analysis["historical_comparisons"] = {
+                "success_rate_change": self._calculate_success_rate_change(historical_data, success_rate),
+                "average_execution_time": self._calculate_avg_execution_time(historical_data),
+                "execution_time_trend": self._determine_execution_time_trend(historical_data, execution_time),
+                "common_failures": self._identify_common_failures(historical_data)
+            }
+            
+        # Identify areas for improvement
+        analysis["improvement_areas"] = []
+        
+        # High error rate indicates reliability issues
+        if error_count > 0 or success_rate < 0.9:
+            analysis["improvement_areas"].append({
+                "area": "reliability",
+                "severity": "high" if success_rate < 0.7 else "medium",
+                "description": "Success rate is below target threshold"
+            })
+            
+        # Long execution time indicates performance issues
+        if execution_time > 30 and (historical_data.get("avg_execution_time", 0) == 0 or 
+                                   execution_time > historical_data.get("avg_execution_time", 0) * 1.5):
+            analysis["improvement_areas"].append({
+                "area": "performance",
+                "severity": "medium", 
+                "description": "Execution time is significantly higher than expected"
+            })
+            
+        # Warnings indicate potential issues
+        if warning_count > 0:
+            analysis["improvement_areas"].append({
+                "area": "robustness",
+                "severity": "low",
+                "description": f"{warning_count} warnings were generated during execution"
+            })
+            
+        return analysis
+        
+    @handle_safely_async
+    async def generate_improvements(self, analysis: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """
+        Generate specific improvement suggestions based on analysis.
+        
+        Args:
+            analysis: Performance analysis
+            
+        Returns:
+            List of improvement suggestions
+        """
+        logger.info(f"Generating improvements based on analysis")
+        
+        improvement_suggestions = []
+        integration_type = analysis.get("integration_type", "unknown")
+        target_name = analysis.get("target_name", "unknown")
+        action = analysis.get("action", "unknown")
+        
+        # Get improvement areas from the analysis
+        improvement_areas = analysis.get("improvement_areas", [])
+        historical_comparisons = analysis.get("historical_comparisons", {})
+        
+        # Generate improvements based on identified areas
+        for area in improvement_areas:
+            area_name = area.get("area")
+            severity = area.get("severity")
+            
+            if area_name == "reliability":
+                # Generate reliability improvements
+                if historical_comparisons.get("common_failures"):
+                    common_failures = historical_comparisons["common_failures"]
+                    
+                    for failure in common_failures:
+                        root_cause = failure.get("root_cause")
+                        # Generate improvement based on root cause
+                        if root_cause == "file_not_found":
+                            improvement_suggestions.append({
+                                "type": "reliability",
+                                "area": "file_handling",
+                                "description": "Add file existence checks before operations",
+                                "implementation": "Wrap file operations in existence checks to prevent failures",
+                                "severity": severity
+                            })
+                        elif root_cause == "permission_denied":
+                            improvement_suggestions.append({
+                                "type": "reliability",
+                                "area": "permissions",
+                                "description": "Add permission checks and privilege escalation",
+                                "implementation": "Check for permissions before operations and use sudo when needed",
+                                "severity": severity
+                            })
+                        elif root_cause == "network_error":
+                            improvement_suggestions.append({
+                                "type": "reliability",
+                                "area": "network",
+                                "description": "Add retry mechanism for network operations",
+                                "implementation": "Implement exponential backoff retry for network calls",
+                                "severity": severity
+                            })
+                        elif "not_found" in root_cause:
+                            improvement_suggestions.append({
+                                "type": "reliability",
+                                "area": "dependencies",
+                                "description": "Add dependency detection and installation",
+                                "implementation": "Check for required tools/packages and install if missing",
+                                "severity": severity
+                            })
+            
+            elif area_name == "performance":
+                # Generate performance improvements
+                improvement_suggestions.append({
+                    "type": "performance",
+                    "area": "execution_optimization",
+                    "description": "Optimize script execution time",
+                    "implementation": "Use parallel execution where possible and remove unnecessary operations",
+                    "severity": severity
+                })
+                
+            elif area_name == "robustness":
+                # Generate robustness improvements
+                improvement_suggestions.append({
+                    "type": "robustness",
+                    "area": "error_handling",
+                    "description": "Improve error handling and reporting",
+                    "implementation": "Add more comprehensive error handling and better error messages",
+                    "severity": severity
+                })
+                
+        # If no specific improvements could be generated, add a general one
+        if not improvement_suggestions:
+            improvement_suggestions.append({
+                "type": "general",
+                "area": "maintainability",
+                "description": "Improve script structure and readability",
+                "implementation": "Add better comments, variable naming, and modularize code",
+                "severity": "low"
+            })
+            
+        return improvement_suggestions
+    
+    @handle_safely_async
+    async def learn_from_execution(self, execution_data: Dict[str, Any]) -> bool:
+        """
+        Learn from execution data to improve future performance.
+        
+        Args:
+            execution_data: Data from a completed execution
+            
+        Returns:
+            True if learning was successful
+        """
+        logger.info(f"Learning from execution data")
+        
+        # Extract key information
+        integration_type = execution_data.get("integration_type", "unknown")
+        target_name = execution_data.get("target_name", "unknown")
+        action = execution_data.get("action", "unknown")
+        success = execution_data.get("success", False)
+        error = execution_data.get("error")
+        output = execution_data.get("output", {})
+        
+        # Create integration key
+        integration_key = f"{integration_type}_{target_name}_{action}"
+        
+        # Initialize learning data for this integration if needed
+        if integration_key not in self.learning_data:
+            self.learning_data[integration_key] = {
+                "failures": [],
+                "successes": 0,
+                "improvements": [],
+                "execution_times": []
+            }
+        
+        # Record execution time if available
+        if "metrics" in execution_data and "duration" in execution_data["metrics"]:
+            self.learning_data[integration_key]["execution_times"].append(
+                execution_data["metrics"]["duration"]
+            )
+        
+        # Update learning data based on success or failure
+        if success:
+            self.learning_data[integration_key]["successes"] += 1
+        else:
+            # Record failure with root cause analysis
+            root_cause = "unknown_error"
+            if error:
+                state = None
+                try:
+                    # Create a WorkflowState if possible for root cause analysis
+                    state_dict = {
+                        "error": error,
+                        "output": output,
+                        "integration_type": integration_type,
+                        "target_name": target_name,
+                        "action": action
+                    }
+                    state = WorkflowState(**state_dict)
+                    root_cause = await self._identify_root_cause(state, error)
+                except Exception as e:
+                    logger.error(f"Error creating state for root cause analysis: {e}")
+                    
+            # Record the failure
+            self.learning_data[integration_key]["failures"].append({
+                "error": error,
+                "root_cause": root_cause,
+                "timestamp": execution_data.get("timestamp"),
+                "system_context": execution_data.get("system_context", {})
+            })
+            
+            # Attempt to generate an improvement if state was created
+            if state and root_cause != "unknown_error":
+                try:
+                    improvement = await self._generate_improvement(state, root_cause)
+                    if improvement:
+                        self.learning_data[integration_key]["improvements"].append({
+                            "root_cause": root_cause,
+                            "improvement": improvement,
+                            "timestamp": execution_data.get("timestamp")
+                        })
+                        await self._apply_improvement(state, improvement)
+                except Exception as e:
+                    logger.error(f"Error generating improvement: {e}")
+        
+        # Save learning data to disk
+        await self._save_learning_data()
+        return True
+    
+    # Helper methods for analysis
+    def _calculate_success_rate_change(self, historical_data: Dict[str, Any], current_rate: float) -> Dict[str, Any]:
+        """Calculate the change in success rate compared to historical data."""
+        total_executions = historical_data.get("successes", 0) + len(historical_data.get("failures", []))
+        if total_executions == 0:
+            return {"current": current_rate, "historical": 0, "change": 0}
+            
+        historical_rate = historical_data.get("successes", 0) / total_executions
+        change = current_rate - historical_rate
+        
+        return {
+            "current": current_rate,
+            "historical": historical_rate,
+            "change": change,
+            "trend": "improving" if change > 0 else "declining" if change < 0 else "stable"
+        }
+        
+    def _calculate_avg_execution_time(self, historical_data: Dict[str, Any]) -> float:
+        """Calculate the average execution time from historical data."""
+        times = historical_data.get("execution_times", [])
+        if not times:
+            return 0
+        return sum(times) / len(times)
+        
+    def _determine_execution_time_trend(self, historical_data: Dict[str, Any], current_time: float) -> Dict[str, Any]:
+        """Determine the trend in execution time."""
+        times = historical_data.get("execution_times", [])
+        if not times:
+            return {"trend": "unknown", "current": current_time, "historical_avg": 0}
+            
+        avg_time = sum(times) / len(times)
+        # Get the average of the last 3 executions if available
+        recent_avg = sum(times[-3:]) / len(times[-3:]) if len(times) >= 3 else avg_time
+        
+        trend = "improving" if current_time < recent_avg else "declining" if current_time > recent_avg * 1.1 else "stable"
+        
+        return {
+            "trend": trend,
+            "current": current_time,
+            "historical_avg": avg_time,
+            "recent_avg": recent_avg
+        }
+        
+    def _identify_common_failures(self, historical_data: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Identify common failure patterns from historical data."""
+        failures = historical_data.get("failures", [])
+        if not failures:
+            return []
+            
+        # Count occurrences of each root cause
+        root_causes = {}
+        for failure in failures:
+            root_cause = failure.get("root_cause", "unknown_error")
+            if root_cause not in root_causes:
+                root_causes[root_cause] = 0
+            root_causes[root_cause] += 1
+            
+        # Convert to list and sort by frequency
+        common_failures = [
+            {"root_cause": cause, "count": count, "percentage": count / len(failures) * 100}
+            for cause, count in root_causes.items()
+        ]
+        
+        return sorted(common_failures, key=lambda x: x["count"], reverse=True)
+    
     async def cleanup(self) -> None:
         """Clean up resources and save learning data."""
         await self._save_learning_data()

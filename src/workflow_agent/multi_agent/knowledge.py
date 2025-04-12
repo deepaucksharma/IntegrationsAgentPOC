@@ -1,5 +1,6 @@
 """
 Enhanced KnowledgeAgent: Manages documentation and knowledge using LLM-driven understanding.
+Implements the KnowledgeAgentInterface from the multi-agent system.
 """
 import logging
 import yaml
@@ -12,7 +13,7 @@ from typing import Dict, Any, Optional, List, Union
 import hashlib
 import time
 
-from ..core.agents.base_agent import BaseAgent
+from .interfaces import KnowledgeAgentInterface
 from ..core.message_bus import MessageBus
 from ..core.state import WorkflowState
 from ..storage.knowledge_base import KnowledgeBase
@@ -20,7 +21,7 @@ from ..llm.service import LLMService, LLMProvider
 
 logger = logging.getLogger(__name__)
 
-class KnowledgeAgent(BaseAgent):
+class KnowledgeAgent(KnowledgeAgentInterface):
     """
     LLM-enhanced agent responsible for retrieving, analyzing, and understanding integration documentation.
     """
@@ -916,6 +917,149 @@ class KnowledgeAgent(BaseAgent):
                 "undefined_parameters": [] if not param_definitions else list(provided_params.keys())
             }
             
+    # Implementing the required KnowledgeAgentInterface methods
+    async def retrieve_knowledge(self, query: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """
+        Retrieve knowledge based on a query.
+        
+        Args:
+            query: Knowledge query string
+            context: Additional context for the query
+            
+        Returns:
+            Dictionary containing retrieved knowledge
+        """
+        logger.info(f"Retrieving knowledge for query: {query}")
+        
+        # Extract context information
+        integration_type = context.get("integration_type") if context else None
+        target_name = context.get("target_name") if context else None
+        
+        # Prepare the result
+        result = {"query": query, "source": "unknown", "confidence": 0.0}
+        
+        try:
+            # If we have integration context, try to retrieve from knowledge base
+            if integration_type:
+                docs = await self.knowledge_base.retrieve_documents(
+                    integration_type=integration_type,
+                    target_name=target_name or integration_type,
+                    action=context.get("action", "all") if context else "all"
+                )
+                
+                if docs:
+                    # Process the query with retrieved docs
+                    query_result = await self._process_knowledge_query(query, docs, context or {})
+                    result = {**result, **query_result}
+                    result["source"] = "knowledge_base"
+                    return result
+            
+            # If no integration context or no docs found, use LLM for general knowledge
+            query_result = await self._process_knowledge_query(query, {}, context or {})
+            result = {**result, **query_result}
+            result["source"] = "llm_general_knowledge"
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error retrieving knowledge: {e}")
+            result["error"] = str(e)
+            return result
+    
+    async def update_knowledge_base(self, new_knowledge: Dict[str, Any], source: Optional[str] = None) -> bool:
+        """
+        Update the knowledge base with new information.
+        
+        Args:
+            new_knowledge: Knowledge to add to the knowledge base
+            source: Source of the knowledge
+            
+        Returns:
+            True if knowledge was successfully added
+        """
+        logger.info(f"Updating knowledge base with new information from {source or 'unknown'}")
+        
+        try:
+            # Extract integration details
+            integration_type = new_knowledge.get("integration_type")
+            target_name = new_knowledge.get("target_name")
+            doc_type = new_knowledge.get("doc_type", "definition")
+            
+            if not integration_type:
+                logger.warning("Cannot update knowledge base: missing integration_type")
+                return False
+                
+            # Add the knowledge to the knowledge base
+            await self.knowledge_base.add_document(
+                integration_type=integration_type,
+                target_name=target_name or integration_type,
+                doc_type=doc_type,
+                content=new_knowledge.get("content", {}),
+                source=source or "user_provided"
+            )
+            
+            logger.info(f"Knowledge base updated for {integration_type}/{target_name}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error updating knowledge base: {e}")
+            return False
+    
+    async def validate_knowledge(self, knowledge: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Validate knowledge for accuracy and consistency.
+        
+        Args:
+            knowledge: Knowledge to validate
+            
+        Returns:
+            Validation results with confidence scores
+        """
+        logger.info("Validating knowledge for accuracy and consistency")
+        
+        try:
+            # Extract integration details if available
+            integration_type = knowledge.get("integration_type")
+            
+            # Prepare prompt for LLM validation
+            prompt = f"""
+            Validate the following knowledge for accuracy and consistency.
+            
+            Knowledge to validate:
+            {json.dumps(knowledge, indent=2)}
+            
+            Analyze this knowledge and provide:
+            1. Assessment of technical accuracy
+            2. Identification of any inconsistencies or contradictions
+            3. Detection of missing critical information
+            4. Overall confidence score (0.0 to 1.0)
+            
+            Format your response as a JSON object with these keys:
+            - valid: boolean indicating if the knowledge is valid
+            - confidence: float between 0.0 and 1.0
+            - issues: array of identified issues or inconsistencies
+            - missing_information: array of missing critical information
+            - recommendations: array of recommendations to improve the knowledge
+            """
+            
+            # Use LLM to analyze
+            validation_result = await self.llm_service.generate_json(
+                prompt=prompt,
+                system_prompt="You are an expert at validating technical knowledge for accuracy and consistency.",
+                temperature=0.1
+            )
+            
+            # Return the validation results
+            return validation_result
+            
+        except Exception as e:
+            logger.error(f"Error validating knowledge: {e}")
+            return {
+                "valid": False,
+                "confidence": 0.0,
+                "issues": [f"Validation error: {str(e)}"],
+                "error": str(e)
+            }
+    
     async def cleanup(self) -> None:
         """Clean up resources."""
         # Clear cache to release memory

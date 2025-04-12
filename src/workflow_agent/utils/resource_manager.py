@@ -1,6 +1,7 @@
 """
 Resource management for workflow agent.
 Provides centralized management of temporary files, processes, and synchronization primitives.
+Integrates with ChangeTracker for standardized change tracking.
 """
 import os
 import shutil
@@ -12,6 +13,7 @@ from pathlib import Path
 from typing import Dict, Set, Optional, Any, List, Union
 from contextlib import asynccontextmanager
 from ..error.exceptions import ResourceError, ErrorContext
+from ..core.state import Change
 
 logger = logging.getLogger(__name__)
 
@@ -21,8 +23,13 @@ class ResourceManager:
     Handles temporary files, directories, processes, locks, and semaphores.
     """
     
-    def __init__(self):
-        """Initialize the resource manager with empty collections."""
+    def __init__(self, config=None):
+        """
+        Initialize the resource manager with empty collections.
+        
+        Args:
+            config: Optional configuration object
+        """
         self._temp_dirs: Set[str] = set()
         self._temp_files: Set[str] = set()
         self._active_processes: Dict[int, asyncio.subprocess.Process] = {}
@@ -30,6 +37,10 @@ class ResourceManager:
         self._semaphores: Dict[str, asyncio.Semaphore] = {}
         self._cleanup_tasks: List[asyncio.Task] = []
         self._global_lock = asyncio.Lock()
+        self._config = config
+        
+        # Initialize the change tracker
+        self._create_change_tracker()
 
     async def initialize(self) -> None:
         """Initialize the resource manager."""
@@ -395,6 +406,54 @@ class ResourceManager:
                 self._active_processes.pop(process.pid, None)
                 logger.debug("Removed process %d from active processes", process.pid)
 
+    def _create_change_tracker(self):
+        """Create an instance of the ChangeTracker for tracking script changes."""
+        # Import here to avoid circular imports
+        from ..execution.change_tracker import ChangeTracker
+        self.change_tracker = ChangeTracker()
+        logger.debug("ChangeTracker initialized")
+    
+    def track_changes(self, output: str) -> List[Change]:
+        """
+        Track changes from script output using the centralized ChangeTracker.
+        
+        Args:
+            output: Script output to parse
+            
+        Returns:
+            List of Change objects
+        """
+        logger.debug("Tracking changes from script output")
+        return self.change_tracker.extract_changes(output)
+    
+    def register_change(self, change_type: str, target: str, revertible: bool = False, 
+                      revert_command: Optional[str] = None, backup_file: Optional[str] = None,
+                      metadata: Optional[Dict[str, Any]] = None) -> Change:
+        """
+        Manually register a change.
+        
+        Args:
+            change_type: Type of change
+            target: Target of the change
+            revertible: Whether the change can be reverted
+            revert_command: Command to revert the change
+            backup_file: Path to backup file if any
+            metadata: Additional metadata
+            
+        Returns:
+            Created Change object
+        """
+        change = Change(
+            type=change_type,
+            target=target,
+            revertible=revertible,
+            revert_command=revert_command,
+            backup_file=backup_file,
+            metadata=metadata or {}
+        )
+        logger.debug(f"Manually registered change: {change_type} on {target}")
+        return change
+    
     def get_resource_stats(self) -> Dict[str, Any]:
         """
         Get current resource usage statistics.
