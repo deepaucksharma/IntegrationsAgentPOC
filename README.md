@@ -12,6 +12,41 @@ This project demonstrates an LLM-powered, multi-agent system for automating the 
 4. **Verification**: Validate successful integration
 5. **Recovery**: Implement fallback mechanisms when operations fail
 
+## Architecture
+
+The system now uses a fully message-based architecture, where all agent communication follows a standardized pattern:
+
+```
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│  KnowledgeAgent │     │ ScriptBuilder   │     │ ExecutionAgent  │
+│  (Knowledge     │     │ (Script         │     │ (Task           │
+│   Management)   │     │  Generation)    │     │  Execution)     │
+└────────┬────────┘     └────────┬────────┘     └────────┬────────┘
+         │                       │                       │
+         │                       │                       │
+         │     ┌─────────────────┐                       │
+         └─────┤                 ├───────────────────────┘
+               │  Coordinator    │
+         ┌─────┤  (Message      ├───────────────────────┐
+         │     │   Routing)     │                       │
+         │     └─────────────────┘                       │
+         │                       │                       │
+┌────────┴────────┐     ┌────────┴────────┐     ┌────────┴────────┐
+│ VerificationAgent│     │ ImprovementAgent│     │ WorkflowTracker │
+│ (Verification &  │     │ (System         │     │ (State          │
+│  Validation)     │     │  Improvement)   │     │  Management)    │
+└─────────────────┘     └─────────────────┘     └─────────────────┘
+```
+
+Key components:
+
+1. **MultiAgentBase**: Foundation class providing message handling and routing capabilities
+2. **Specialized Interfaces**: Defined contracts for each agent type with required methods
+3. **Message System**: Standardized format for all inter-agent communication
+4. **Coordinator**: Central message routing and workflow orchestration
+5. **WorkflowTracker**: Immutable workflow state history and checkpointing
+6. **Recovery System**: Sophisticated error handling with multiple recovery strategies
+
 ## Getting Started
 
 ### Prerequisites
@@ -79,12 +114,12 @@ use_llm: true
 python -m workflow_agent install infra_agent --license-key "your-license-key" --host "localhost"
 ```
 
-### Standalone Example
+### Enhanced Workflow Example
 
-For a quick demo, run the standalone example:
+For a demonstration of the new message-based architecture and recovery capabilities:
 
 ```bash
-python examples/standalone_infra_agent.py --action install --license "your-license-key"
+python examples/enhanced_workflow_test.py --action install --integration infra_agent --license "your-license-key"
 ```
 
 ## Project Structure
@@ -92,19 +127,29 @@ python examples/standalone_infra_agent.py --action install --license "your-licen
 ```
 IntegrationsAgentPOC/
 ├── src/workflow_agent/           # Main package
-│   ├── agent/                    # Agent implementations
 │   ├── core/                     # Core framework components
+│   ├── multi_agent/              # Multi-agent system
+│   │   ├── base.py               # Base message system
+│   │   ├── interfaces.py         # Agent interfaces
+│   │   ├── coordinator.py        # Message routing and orchestration
+│   │   ├── verification.py       # Verification agent
+│   │   ├── recovery.py           # Error recovery system
+│   │   └── workflow_tracker.py   # State tracking and checkpoints
 │   ├── execution/                # Script execution with isolation
-│   ├── multi_agent/              # Multi-agent coordination
 │   ├── templates/                # Template handling
-│   ├── verification/             # Result verification
+│   ├── storage/                  # Knowledge storage and caching
+│   ├── plugins/                  # Plugin system
 │   └── utils/                    # Utility functions
 ├── templates/                    # Script templates
 ├── plugins/                      # Integration plugins
 ├── examples/                     # Example scripts
 ├── docs/                         # Documentation
-├── generated_scripts/            # Output directory for scripts
-└── tests/                        # Test suite
+│   ├── refactoring/              # Refactoring documentation
+│   └── message_based_architecture.md # Architecture details
+├── tests/                        # Test suite
+│   ├── unit/                     # Unit tests
+│   └── integration/              # Integration tests
+└── generated_scripts/            # Output directory for scripts
 ```
 
 ## Documentation
@@ -112,20 +157,63 @@ IntegrationsAgentPOC/
 For more detailed information, refer to:
 - [Documentation Index](docs/INDEX.md)
 - [Architecture Overview](docs/architecture-readme.md)
+- [Message-Based Architecture](docs/message_based_architecture.md)
 - [Code Standards](docs/code_standards.md)
-- [Plugin Development](plugins/README.md)
-- [Template Development](templates/README.md)
 - [Refactoring Implementation](README-refactoring.md)
+- [API Documentation](docs/INDEX.md)
 
-## Development Workflow
+## Development
 
-When developing new features or fixing bugs:
+### Agent Implementation Example
 
-1. Create a feature branch from `main`
-2. Make your changes, following the [code standards](docs/code_standards.md)
-3. Add tests for your changes
-4. Run tests to ensure all tests pass
-5. Submit a pull request
+To implement a new agent using the interface-based design:
+
+```python
+from workflow_agent.multi_agent.interfaces import ExecutionAgentInterface
+from workflow_agent.multi_agent.base import MessageType, MessagePriority
+
+class CustomExecutionAgent(ExecutionAgentInterface):
+    def __init__(self, coordinator):
+        super().__init__(coordinator=coordinator, agent_id="custom_execution")
+        self.register_message_handler(MessageType.EXECUTION_REQUEST, self._handle_execution_request)
+    
+    async def execute_task(self, task, context=None):
+        # Implementation of required interface method
+        return {"success": True, "output": "Task executed successfully"}
+        
+    async def validate_execution(self, execution_result):
+        # Implementation of required interface method
+        return {"valid": True}
+        
+    async def handle_execution_error(self, error, task, context):
+        # Implementation of required interface method
+        return {"recovery_action": "retry"}
+    
+    async def _handle_message(self, message):
+        # Generic message handler
+        self.logger.warning(f"No handler for message type: {message.message_type}")
+```
+
+### Message Sending Example
+
+To send messages between agents:
+
+```python
+# Send a message and wait for response
+response = await agent.send_message(
+    recipient="knowledge",
+    message_type=MessageType.KNOWLEDGE_REQUEST,
+    content={"query": "Get information about monitoring agent"},
+    metadata={"workflow_id": workflow_id},
+    wait_for_response=True,
+    response_timeout=30  # seconds
+)
+
+# Process the response
+if response and response.content.get("knowledge"):
+    knowledge = response.content["knowledge"]
+    print(f"Received knowledge: {knowledge}")
+```
 
 ## Maintenance
 
